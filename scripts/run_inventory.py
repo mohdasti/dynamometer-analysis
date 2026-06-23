@@ -269,6 +269,48 @@ def summarize_gripforce(stats: list[GripforceFileStats]) -> dict[str, Any]:
     }
 
 
+def summarize_gripforce_root(root: Path) -> dict[str, Any]:
+    if not root.exists():
+        return {"exists": False, "path": str(root)}
+
+    sub_folders = sorted(
+        p.name for p in root.iterdir() if p.is_dir() and p.name.lower().startswith("sub-bap")
+    )
+    other_folders = sorted(
+        p.name for p in root.iterdir() if p.is_dir() and not p.name.lower().startswith("sub-bap")
+    )
+    return {
+        "exists": True,
+        "path": str(root),
+        "n_sub_folders": len(sub_folders),
+        "sub_folders_sample": sub_folders[:5],
+        "other_folders": other_folders,
+    }
+
+
+KNOWN_BEHAVIORAL_FILES = {
+    "bap_beh_trialdata_v3.csv": "Primary trial-level behavioral table (latest; use for gripforce linkage)",
+    "bap_beh_trialdata_v2.csv": "Prior trial-level behavioral table (superseded by v3)",
+    "bap_beh_subjxtaskdata_v2.csv": "Subject-by-task summary (not trial-level)",
+    "bap_beh_trialdata_v2_trials_per_subject_per_task.csv": "Trial counts per subject/task (coverage QA)",
+    "bap_beh_trialdata_v3_report.txt": "Processing report for trialdata v3",
+    "bap_beh_trialdata_v2_report.txt": "Processing report for trialdata v2",
+    "LC Aging Subject Data master spreadsheet - behavioral data dictionary.csv": "Column definitions for behavioral fields",
+    "LC Aging Subject Data master spreadsheet - behavioral.csv": "Master behavioral spreadsheet export",
+}
+
+
+def classify_behavioral_file(name: str) -> str:
+    lower = name.lower()
+    if name in KNOWN_BEHAVIORAL_FILES:
+        return "bap_behavioral"
+    if lower.startswith("lc aging") or lower.startswith("lc_grant"):
+        return "lc_master_spreadsheet"
+    if lower.endswith("_report.txt"):
+        return "processing_report"
+    return "other"
+
+
 def inventory_behavioral_root(root: Path, max_preview_rows: int = 3) -> dict[str, Any]:
     if not root.exists():
         return {"exists": False, "path": str(root)}
@@ -278,6 +320,19 @@ def inventory_behavioral_root(root: Path, max_preview_rows: int = 3) -> dict[str
     tabular_files: list[dict[str, Any]] = []
     code_files: list[str] = []
     data_files: list[str] = []
+    known_files: list[dict[str, str]] = []
+    report_files: list[str] = []
+
+    for path in sorted(root.iterdir() if root.is_dir() else []):
+        if path.is_dir():
+            top_level.append({"name": path.name, "type": "dir"})
+        elif path.is_file():
+            top_level.append({"name": path.name, "type": "file", "size_bytes": path.stat().st_size})
+            role = classify_behavioral_file(path.name)
+            if path.name in KNOWN_BEHAVIORAL_FILES:
+                known_files.append({"name": path.name, "role": KNOWN_BEHAVIORAL_FILES[path.name]})
+            if role == "processing_report":
+                report_files.append(path.name)
 
     for path in sorted(root.rglob("*")):
         if not path.is_file():
@@ -286,11 +341,8 @@ def inventory_behavioral_root(root: Path, max_preview_rows: int = 3) -> dict[str
         suffix_counts[path.suffix or "(no suffix)"] += 1
         rel = str(path.relative_to(root))
 
-        if path.parent == root:
-            top_level.append({"name": path.name, "type": "dir" if path.is_dir() else "file"})
-
         lower_suffix = path.suffix
-        if suffix in {s.lower() for s in TABULAR_SUFFIXES}:
+        if suffix in {s.lower() for s in TABULAR_SUFFIXES} and not path.name.endswith("_report.txt"):
             tabular_files.append(inspect_tabular_file(path, root, max_preview_rows))
         elif lower_suffix in CODE_SUFFIXES:
             code_files.append(rel)
@@ -298,13 +350,21 @@ def inventory_behavioral_root(root: Path, max_preview_rows: int = 3) -> dict[str
             data_files.append(rel)
 
     linkage_notes = infer_linkage_notes(tabular_files)
+    if any(item["name"] == "bap_beh_trialdata_v3.csv" for item in known_files):
+        linkage_notes.insert(
+            0,
+            "Primary linkage table: `bap_beh_trialdata_v3.csv` (trial-level; pair with gripforce via subject/session/run/task).",
+        )
 
     return {
         "exists": True,
         "path": str(root),
+        "layout": "flat",
         "n_files": sum(suffix_counts.values()),
         "suffix_counts": dict(suffix_counts.most_common()),
         "top_level": top_level,
+        "known_files": known_files,
+        "report_files": sorted(report_files),
         "tabular_files": tabular_files,
         "code_files": sorted(code_files),
         "serialized_data_files": sorted(data_files),
@@ -439,6 +499,7 @@ def infer_linkage_notes(tabular_files: list[dict[str, Any]]) -> list[str]:
 def render_markdown_report(
     gripforce_summary: dict[str, Any],
     gripforce_stats: list[GripforceFileStats],
+    gripforce_root_summary: dict[str, Any],
     behavioral: dict[str, Any],
     paths: dict[str, str],
     generated_at: str,
@@ -455,15 +516,34 @@ def render_markdown_report(
         f"- Exists (gripforce): `{Path(paths.get('gripforce_root', '')).exists()}`",
         f"- Exists (behavioral): `{behavioral.get('exists', False)}`",
         "",
-        "## Gripforce summary",
-        "",
-        f"- Files inventoried: **{gripforce_summary['n_files']}**",
-        f"- Subjects: **{gripforce_summary['n_subjects']}**",
-        f"- Sessions (unique session labels in filenames): **{gripforce_summary['n_sessions']}**",
-        "",
-        "### Tasks (file counts)",
-        "",
     ]
+
+    if gripforce_root_summary.get("exists"):
+        lines.extend(
+            [
+                "### Gripforce root layout",
+                "",
+                f"- `sub-BAP###` folders: **{gripforce_root_summary['n_sub_folders']}**",
+            ]
+        )
+        if gripforce_root_summary.get("other_folders"):
+            lines.append(
+                f"- Other folders: {', '.join(f'`{name}`' for name in gripforce_root_summary['other_folders'])}"
+            )
+        lines.append("")
+
+    lines.extend(
+        [
+            "## Gripforce summary",
+            "",
+            f"- Files inventoried: **{gripforce_summary['n_files']}**",
+            f"- Subjects: **{gripforce_summary['n_subjects']}**",
+            f"- Sessions (unique session labels in filenames): **{gripforce_summary['n_sessions']}**",
+            "",
+            "### Tasks (file counts)",
+            "",
+        ]
+    )
 
     for task, count in sorted(gripforce_summary["tasks"].items()):
         lines.append(f"- {task}: {count}")
@@ -500,7 +580,16 @@ def render_markdown_report(
     if not behavioral.get("exists"):
         lines.append(f"Path not found: `{behavioral.get('path', '')}`")
     else:
+        lines.append(f"- Layout: **{behavioral.get('layout', 'unknown')}** (no subfolders)")
         lines.append(f"- Total files: **{behavioral['n_files']}**")
+        if behavioral.get("known_files"):
+            lines.extend(["", "### Key behavioral files", ""])
+            for item in behavioral["known_files"]:
+                lines.append(f"- `{item['name']}` — {item['role']}")
+        if behavioral.get("report_files"):
+            lines.extend(["", "### Processing reports", ""])
+            for name in behavioral["report_files"]:
+                lines.append(f"- `{name}`")
         lines.append("")
         lines.append("### File types")
         lines.append("")
@@ -571,6 +660,7 @@ def run_inventory(config_path: Path | None = None, output_dir: Path | None = Non
     gripforce_files = find_gripforce_files(gripforce_root)
     stats = [summarize_gripforce_file(path) for path in gripforce_files]
     summary = summarize_gripforce(stats)
+    gripforce_root_summary = summarize_gripforce_root(gripforce_root)
     behavioral = inventory_behavioral_root(behavioral_root)
 
     generated_at = datetime.now().isoformat(timespec="seconds")
@@ -585,7 +675,7 @@ def run_inventory(config_path: Path | None = None, output_dir: Path | None = Non
 
     report_md = out_dir / "dataset_inventory.md"
     report_md.write_text(
-        render_markdown_report(summary, stats, behavioral, paths, generated_at),
+        render_markdown_report(summary, stats, gripforce_root_summary, behavioral, paths, generated_at),
         encoding="utf-8",
     )
 

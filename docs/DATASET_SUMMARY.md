@@ -1,64 +1,70 @@
-# Dataset Summary (pre-inventory baseline)
+# Dataset Summary
 
-This summary combines documented expectations from project handoff notes with what the inventory script will quantify when run on your Mac. **Run `python scripts/run_inventory.py` locally to replace estimates with measured values.**
+Confirmed local paths (Mac, Jun 2026). Per-file gripforce stats (duration, force min/max) require running `python scripts/run_inventory.py`.
 
-## Environment note
+## Data paths — confirmed
 
-Raw data live on the local Mac at paths configured in `config/paths.local.yaml`. Cloud agents cannot access those folders; inventory numbers below marked *(expected)* come from prior manual counts unless you have run the script locally.
+| Path | Status | Contents |
+|------|--------|----------|
+| `/Users/mohdasti/Documents/LC-BAP/BAP/BAP data` | Exists | 85 `sub-BAP###` folders + `BAP tablet data/` |
+| `/Users/mohdasti/Documents/LC-BAP/BAP/Nov2025` | Exists | Flat folder; 13 data files (CSVs, reports, master spreadsheet exports) |
 
-## Data paths
+## Gripforce data (`BAP data/`)
 
-| Path | Purpose | Status on Mac |
-|------|---------|---------------|
-| `/Users/mohdasti/Documents/LC-BAP/BAP/BAP data` | Raw gripforce CSVs | Expected — confirm locally |
-| `/Users/mohdasti/Documents/LC-BAP/BAP/Nov2025` | Behavioral / prior analysis | Expected — confirm locally |
+### Top-level layout
 
-## Gripforce files *(expected)*
+- **85** subject folders matching `sub-BAP###`
+- **`BAP tablet data/`** — separate tablet recordings (not in-scanner `InsideScanner` gripforce; treat as distinct modality until inventoried)
+
+### In-scanner gripforce *(expected from prior counts)*
 
 | Metric | Value |
 |--------|------:|
-| Total files (`*_gripforce.csv` under `*InsideScanner*`) | 202 |
-| Subjects (approx.) | ~90 `sub-BAP###` folders |
-| Task: Aoddball | 84 files |
-| Task: Voddball | 72 files |
-| Task: MVCnPRAC | 46 files |
+| Files (`*_gripforce.csv` under `*InsideScanner*`) | 202 |
+| Task: Aoddball | 84 |
+| Task: Voddball | 72 |
+| Task: MVCnPRAC | 46 |
 
 ### File format
 
 - No header; 4 numeric columns at ~100 Hz
-- Col 1: marker/code (task-dependent, not force)
-- Col 2: elapsed time within run (seconds)
-- Col 3: absolute timestamp (seconds)
-- Col 4: grip force (**units TBD**; sample values ~1–13)
+- Col 1: marker/code | Col 2: elapsed time (s) | Col 3: absolute timestamp (s) | Col 4: grip force (**units TBD**)
 
-### Filename / BIDS keys
+### Keys for linkage
 
-```
-sub-BAP###/ses-N/InsideScanner/subjectBAP###_{Task}_session{N}_run{R}_{M}_{D}_{H}_{Min}_gripforce.csv
-```
+`sub-BAP###/ses-N/InsideScanner/subjectBAP###_{Task}_session{N}_run{R}_..._gripforce.csv`
 
-Join keys: **subject (`BAP###`)**, **session**, **run**, **task**.
+→ **subject**, **session**, **run**, **task**
 
-## Behavioral data (Nov2025)
+## Behavioral data (`Nov2025/`)
 
-Structure must be confirmed by running the inventory script locally. The script will:
+Flat folder (no subdirectories). File inventory:
 
-- Catalog file types (CSV, R, RData, etc.)
-- Preview tabular column names
-- Flag candidate join columns (subject, session, run, task, timestamps)
-- Identify the best candidate trial-level linkage table
-
-See [DATA_LINKAGE.md](DATA_LINKAGE.md) for the join strategy.
+| File | Role |
+|------|------|
+| `bap_beh_trialdata_v3.csv` | **Primary trial-level table** (8.8 MB; Jan 2026) — main target for gripforce linkage |
+| `bap_beh_trialdata_v3_report.txt` | Processing / QA report for v3 |
+| `bap_beh_trialdata_v2.csv` | Prior trial-level export (6.3 MB) |
+| `bap_beh_trialdata_v2_report.txt` | Processing report for v2 |
+| `bap_beh_subjxtaskdata_v2.csv` | Subject × task summary (aggregated, not trial-level) |
+| `bap_beh_trialdata_v2_trials_per_subject_per_task.csv` | Trial counts per subject/task (coverage QA) |
+| `LC Aging Subject Data master spreadsheet - behavioral data dictionary.csv` | Column definitions |
+| `LC Aging Subject Data master spreadsheet - behavioral.csv` | Master behavioral export |
+| `LC Aging Subject Data master spreadsheet - demographics.csv` | Demographics |
+| `LC Aging Subject Data master spreadsheet - neuropsych.csv` | Neuropsych |
+| `LC Aging Subject Data master spreadsheet - LC integrity.csv` | LC integrity |
+| `LC_Grant_Updated_LC_values.2026.csv` / `.xlsx` | LC grant values |
 
 ## Linkage plan (gripforce ↔ behavior)
 
-1. **File-level:** Match `BAP### + session + run + task` between gripforce filenames and behavioral tables.
-2. **Event-level:** Align behavioral trial onsets to gripforce column 2 (elapsed s within run).
-3. **Clock check:** Compare behavioral absolute times (if present) to gripforce column 3 range per file.
+1. **File-level join:** Match gripforce filenames to rows in `bap_beh_trialdata_v3.csv` on **subject + session + run + task** (exact column names confirmed when inventory script reads headers).
+2. **Coverage QA:** Compare gripforce file counts vs `bap_beh_trialdata_v2_trials_per_subject_per_task.csv` and/or aggregated counts from v3.
+3. **Event-level join:** Map behavioral trial onsets onto gripforce **column 2** (elapsed s within run). Use **column 3** if v3 includes absolute timestamps on a shared clock.
+4. **Reference:** `LC Aging ... behavioral data dictionary.csv` for behavioral field definitions.
 
-## Immediate next steps
+## Next steps
 
-1. Run `python scripts/run_inventory.py` on the Mac and commit `reports/dataset_inventory.md` if desired.
-2. Confirm force units from acquisition / calibration documentation.
-3. Manually validate one subject-session-run dyad (behavioral events vs gripforce trace).
-4. Plan task-specific summaries (peak force, mean, variability, event-locked windows) after QA.
+1. Run locally: `python scripts/run_inventory.py` → fills `reports/dataset_inventory.md` with measured durations, force ranges, and v3 column list.
+2. Confirm grip force units (acquisition notes / MVC calibration).
+3. Spot-check one subject-session-run (e.g. BAP103 ses-3 MVCnPRAC run1) against v3 trials.
+4. Decide whether `BAP tablet data/` should be inventoried separately from in-scanner gripforce.

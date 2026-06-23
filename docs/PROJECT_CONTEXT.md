@@ -20,6 +20,8 @@ Build analysis tooling for **BAP in-scanner dynamometer (grip force) data**, sta
 | Raw gripforce CSVs | `/Users/mohdasti/Documents/LC-BAP/BAP/BAP data` |
 | Behavioral / prior analysis (Nov 2025) | `/Users/mohdasti/Documents/LC-BAP/BAP/Nov2025` |
 
+**Confirmed (Mac):** `BAP data/` holds 85 `sub-BAP###` folders plus `BAP tablet data/`. `Nov2025/` is a flat folder of behavioral CSVs and LC master spreadsheet exports; primary trial-level file is `bap_beh_trialdata_v3.csv`.
+
 ## Raw dynamometer data layout
 
 BIDS-like hierarchy:
