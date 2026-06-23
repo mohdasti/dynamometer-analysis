@@ -28,6 +28,15 @@ python3 scripts/run_inventory.py
 
 This writes `reports/dataset_inventory.md` and `reports/gripforce_file_inventory.csv`. See [docs/DATA_LINKAGE.md](docs/DATA_LINKAGE.md) for how behavioral tables are expected to join gripforce files.
 
+## Quarto analysis (Positron)
+
+1. Open the repo folder in Positron (not just the `.qmd` file).
+2. Create/select a Python interpreter: `.venv` with `pip install -r requirements.txt`.
+3. Open and run `analysis/01_ingest.qmd` chunk-by-chunk (Run Cell) or render the full document.
+4. Install [Quarto](https://quarto.org/docs/get-started/) if you want HTML/PDF output (`quarto render analysis/01_ingest.qmd`).
+
+Ensure `config/paths.local.yaml` points to your Mac data paths before running.
+
 ## Data (not in git)
 
 | Resource | Default path |

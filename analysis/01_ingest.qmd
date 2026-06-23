@@ -1,0 +1,102 @@
+---
+title: "BAP Gripforce — Data Ingestion"
+author: "Mohd Dastgheib"
+format:
+  html:
+    toc: true
+    code-tools: true
+jupyter: python3
+---
+
+## Overview
+
+This document loads raw in-scanner dynamometer data (100 Hz), segments it into trial epochs, and previews the result. Raw data stay outside git; paths come from `config/paths.local.yaml`.
+
+## Setup
+
+```{python}
+#| label: setup
+#| message: false
+
+from pathlib import Path
+import sys
+
+import pandas as pd
+import yaml
+
+# Working directory should be the repo root (dynamometer-analysis/)
+REPO = Path.cwd()
+if not (REPO / "scripts" / "gripforce_io.py").exists():
+    raise FileNotFoundError(
+        "Open the dynamometer-analysis repo folder in Positron and set the "
+        "working directory to the repo root (folder containing scripts/)."
+    )
+
+sys.path.insert(0, str(REPO / "scripts"))
+
+from gripforce_io import load_gripforce_long
+
+config_path = REPO / "config" / "paths.local.yaml"
+if not config_path.exists():
+    config_path = REPO / "config" / "paths.example.yaml"
+
+with config_path.open() as f:
+    paths = yaml.safe_load(f)
+
+GRIPFORCE_ROOT = paths["gripforce_root"]
+BEHAVIORAL_ROOT = paths["behavioral_root"]
+
+print(f"Repo: {REPO}")
+print(f"Gripforce root: {GRIPFORCE_ROOT}")
+print(f"Behavioral root: {BEHAVIORAL_ROOT}")
+```
+
+> **Positron tip:** If `Path.cwd()` is wrong, use **Session > Set Working Directory** and choose your `dynamometer-analysis` repo folder.
+
+## Load & segment gripforce
+
+Each CSV is one **run**. Trials are split when `elapsed_time` (col2) resets. Trials with fewer than 100 samples (~1 s) are dropped as edge artifacts.
+
+```{python}
+#| label: ingest-gripforce
+#| message: false
+
+grip = load_gripforce_long(
+    GRIPFORCE_ROOT,
+    min_rows_per_trial=100,
+    sessions=(2, 3),
+)
+
+print(f"Rows: {len(grip):,}")
+print(f"Runs: {grip['source_file'].nunique()}")
+print(f"Subjects: {grip['subject_id'].nunique()}")
+grip.head(10)
+```
+
+## Quick summaries
+
+```{python}
+#| label: summaries
+
+run_summary = (
+    grip.groupby(["subject_id", "session_num", "run_num", "task"], as_index=False)
+    .agg(
+        n_trials=("trial_idx", "nunique"),
+        n_samples=("raw_force", "size"),
+        force_mean=("raw_force", "mean"),
+        force_max=("raw_force", "max"),
+    )
+    .sort_values(["subject_id", "session_num", "run_num", "task"])
+)
+
+run_summary.head(10)
+```
+
+## Next steps
+
+1. Load `bap_beh_trialdata_v3.csv` from the behavioral folder.
+2. Join on `subject_id`, `session_num`, `run_num`, and `trial_idx` ↔ `trial_num`.
+3. Map `task` to `task_modality` if labels differ.
+4. Build trial-locked force features and merge LC covariates.
+
+See `docs/DATA_LINKAGE.md` in the repo for join details.
