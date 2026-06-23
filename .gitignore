@@ -1,0 +1,8 @@
+config/paths.local.yaml
+.DS_Store
+__pycache__/
+*.pyc
+.Rproj.user
+.Rhistory
+.venv/
+venv/

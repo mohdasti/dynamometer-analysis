@@ -1,0 +1,4 @@
+# Copy to paths.local.yaml and adjust if needed (paths.local.yaml should be gitignored)
+
+gripforce_root: "/Users/mohdasti/Documents/LC-BAP/BAP/BAP data"
+behavioral_root: "/Users/mohdasti/Documents/LC-BAP/BAP/Nov2025"
