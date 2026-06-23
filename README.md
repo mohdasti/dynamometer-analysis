@@ -11,6 +11,7 @@ git clone https://github.com/mohdasti/dynamometer-analysis.git
 cd dynamometer-analysis
 git pull   # ensure you have scripts/ (merged from cursor/gripforce-inventory-d9c4)
 cp config/paths.example.yaml config/paths.local.yaml
+# Edit paths.local.yaml if your data live elsewhere
 python3 -m venv .venv && source .venv/bin/activate
 python3 -m pip install -r requirements.txt
 ```
