@@ -11,7 +11,7 @@ Parsed from BIDS path and filename:
 | Subject | `sub-BAP###` folder + `subjectBAP###` in filename | `BAP103` |
 | Session | `ses-N` folder + `sessionN` in filename | `3` |
 | Run | `runN` in filename | `1` |
-| Task | token before `_session` in filename | `MVCnPRAC`, `Voddball`, `Aoddball` |
+| Task | token before `_session` in filename | `Voddball`, `Aoddball` |
 | Acquisition time | `{M}_{D}_{H}_{Min}` suffix in filename | `07-08 12:44` |
 
 Within each gripforce CSV (no header):
@@ -34,7 +34,7 @@ Header confirmed on Mac (Jan 2026 export):
 | `task_modality` | Task in filename | See task mapping below — **verify unique values** |
 | `run_datetime` | `{M}_{D}_{H}_{Min}` in filename | Cross-check acquisition timestamp |
 | `trial_num` | — | Trial index within run |
-| `mvc` | MVCnPRAC runs | Subject MVC used for normalization |
+| `mvc` | Subject-level in v3 | MVC for normalization (not from MVCnPRAC grip files) |
 
 ### Task name mapping (verify with `cut -d, -f6 ... | sort -u`)
 
@@ -42,7 +42,8 @@ Header confirmed on Mac (Jan 2026 export):
 |-------------------------|--------------------------|
 | `Aoddball` | Auditory oddball (e.g. `Aud`, `auditory`) |
 | `Voddball` | Visual oddball (e.g. `Vis`, `visual`) |
-| `MVCnPRAC` | MVC / practice (exact label TBD) |
+
+**MVCnPRAC** grip files and behavioral rows are **excluded** from analysis pipelines. Use the `mvc` column in v3 for force normalization.
 
 Run on Mac:
 

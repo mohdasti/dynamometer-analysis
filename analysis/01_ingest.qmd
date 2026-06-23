@@ -12,6 +12,8 @@ jupyter: python3
 
 This document loads raw in-scanner dynamometer data (100 Hz), segments it into trial epochs, and previews the result. Raw data stay outside git; paths come from `config/paths.local.yaml`.
 
+**Analysis scope:** Auditory and visual oddball tasks only (`Aoddball`, `Voddball`). **MVCnPRAC** calibration/practice runs are excluded — subject MVC for normalization comes from the behavioral table (`mvc` column in v3).
+
 ## Setup
 
 ```{python}
@@ -34,7 +36,7 @@ if not (REPO / "scripts" / "gripforce_io.py").exists():
 
 sys.path.insert(0, str(REPO / "scripts"))
 
-from gripforce_io import load_gripforce_long
+from gripforce_io import DEFAULT_EXCLUDE_TASKS, filter_behavioral_trials, load_gripforce_long
 
 config_path = REPO / "config" / "paths.local.yaml"
 if not config_path.exists():
@@ -49,6 +51,7 @@ BEHAVIORAL_ROOT = paths["behavioral_root"]
 print(f"Repo: {REPO}")
 print(f"Gripforce root: {GRIPFORCE_ROOT}")
 print(f"Behavioral root: {BEHAVIORAL_ROOT}")
+print(f"Excluded tasks: {DEFAULT_EXCLUDE_TASKS}")
 ```
 
 > **Positron tip:** If `Path.cwd()` is wrong, use **Session > Set Working Directory** and choose your `dynamometer-analysis` repo folder.
@@ -65,11 +68,13 @@ grip = load_gripforce_long(
     GRIPFORCE_ROOT,
     min_rows_per_trial=100,
     sessions=(2, 3),
+    exclude_tasks=DEFAULT_EXCLUDE_TASKS,
 )
 
 print(f"Rows: {len(grip):,}")
 print(f"Runs: {grip['source_file'].nunique()}")
 print(f"Subjects: {grip['subject_id'].nunique()}")
+print(f"Tasks: {sorted(grip['task'].unique())}")
 grip.head(10)
 ```
 
@@ -92,11 +97,29 @@ run_summary = (
 run_summary.head(10)
 ```
 
+## Load behavioral & join
+
+```{python}
+#| label: join-behavior
+
+beh = pd.read_csv(f"{BEHAVIORAL_ROOT}/bap_beh_trialdata_v3.csv")
+beh = filter_behavioral_trials(beh)
+
+merged = grip.merge(
+    beh,
+    left_on=["subject_id", "session_num", "run_num", "trial_idx"],
+    right_on=["subject_id", "session_num", "run_num", "trial_num"],
+    how="inner",
+)
+print(f"Behavior rows (oddball only): {len(beh):,}")
+print(f"Merged rows: {len(merged):,}")
+merged.head()
+```
+
 ## Next steps
 
-1. Load `bap_beh_trialdata_v3.csv` from the behavioral folder.
-2. Join on `subject_id`, `session_num`, `run_num`, and `trial_idx` ↔ `trial_num`.
-3. Map `task` to `task_modality` if labels differ.
-4. Build trial-locked force features and merge LC covariates.
+1. Run join QA (task labels, trial counts per run).
+2. Validate raw `raw_force` vs `grip_force_mean_au` on matched trials.
+3. Build trial-locked features and merge LC covariates from subj×task table.
 
 See `docs/DATA_LINKAGE.md` in the repo for join details.

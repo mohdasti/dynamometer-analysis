@@ -17,6 +17,7 @@ GRIPFORCE_FILENAME_RE = re.compile(
 )
 
 COLUMN_NAMES = ("marker", "elapsed_time", "abs_time", "raw_force")
+DEFAULT_EXCLUDE_TASKS = ("MVCnPRAC",)
 
 
 def parse_gripforce_filename(path: Path) -> dict[str, str | int]:
@@ -38,6 +39,7 @@ def find_gripforce_files(
     gripforce_root: str | Path,
     *,
     sessions: tuple[int, ...] | None = (2, 3),
+    exclude_tasks: tuple[str, ...] | None = DEFAULT_EXCLUDE_TASKS,
 ) -> list[Path]:
     """Return sorted gripforce CSV paths under InsideScanner folders."""
     root = Path(gripforce_root)
@@ -45,11 +47,18 @@ def find_gripforce_files(
         raise FileNotFoundError(f"gripforce_root not found: {root}")
 
     files = sorted(p for p in root.rglob(GRIPFORCE_GLOB) if "InsideScanner" in p.parts)
-    if sessions is None:
-        return files
+    if sessions is not None:
+        session_tokens = {f"ses-{s}" for s in sessions}
+        files = [p for p in files if any(token in p.parts for token in session_tokens)]
 
-    session_tokens = {f"ses-{s}" for s in sessions}
-    return [p for p in files if any(token in p.parts for token in session_tokens)]
+    if exclude_tasks:
+        excluded = {task.upper() for task in exclude_tasks}
+        files = [
+            p
+            for p in files
+            if parse_gripforce_filename(p)["task"].upper() not in excluded
+        ]
+    return files
 
 
 def _load_raw_gripforce_csv(path: Path) -> pd.DataFrame:
@@ -130,6 +139,7 @@ def load_gripforce_long(
     *,
     min_rows_per_trial: int = 100,
     sessions: tuple[int, ...] | None = (2, 3),
+    exclude_tasks: tuple[str, ...] | None = DEFAULT_EXCLUDE_TASKS,
 ) -> pd.DataFrame:
     """
     Load all in-scanner gripforce CSVs into one long-format DataFrame.
@@ -142,6 +152,8 @@ def load_gripforce_long(
         Drop trial epochs with fewer rows (default 100 ≈ 1 s at 100 Hz).
     sessions:
         Include only these session folders (default (2, 3)). Pass None for all.
+    exclude_tasks:
+        Task names to skip (default: MVCnPRAC calibration/practice runs).
 
     Returns
     -------
@@ -149,7 +161,11 @@ def load_gripforce_long(
         Columns: marker, elapsed_time, abs_time, raw_force, trial_idx,
         subject_id, session_num, run_num, task, source_file.
     """
-    files = find_gripforce_files(gripforce_root, sessions=sessions)
+    files = find_gripforce_files(
+        gripforce_root,
+        sessions=sessions,
+        exclude_tasks=exclude_tasks,
+    )
     if not files:
         return pd.DataFrame(
             columns=[
@@ -196,3 +212,16 @@ def load_gripforce_long(
         "source_file",
     ]
     return out[col_order]
+
+
+def filter_behavioral_trials(
+    beh: pd.DataFrame,
+    *,
+    task_col: str = "task_modality",
+    exclude_tasks: tuple[str, ...] | None = DEFAULT_EXCLUDE_TASKS,
+) -> pd.DataFrame:
+    """Drop behavioral rows for excluded tasks (default: MVCnPRAC)."""
+    if not exclude_tasks:
+        return beh
+    excluded = set(exclude_tasks)
+    return beh.loc[~beh[task_col].isin(excluded)].reset_index(drop=True)

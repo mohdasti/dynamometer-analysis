@@ -24,8 +24,14 @@ def test_load_fixture_paths():
 
 def test_find_three_fixture_gripforce_files():
     paths = load_paths(FIXTURE_CONFIG)
-    files = find_gripforce_files(ROOT / paths["gripforce_root"])
+    files = find_gripforce_files(ROOT / paths["gripforce_root"], exclude_tasks=())
     assert len(files) == 3
+
+
+def test_find_gripforce_files_excludes_mvcnprac_by_default():
+    paths = load_paths(FIXTURE_CONFIG)
+    files = find_gripforce_files(ROOT / paths["gripforce_root"])
+    assert len(files) == 2
 
 
 def test_summarize_single_file_sample_rate():
@@ -47,4 +53,4 @@ def test_gripforce_summary_task_counts():
     files = find_gripforce_files(ROOT / paths["gripforce_root"])
     stats = [summarize_gripforce_file(path) for path in files]
     summary = summarize_gripforce(stats)
-    assert summary["tasks"] == {"Aoddball": 1, "MVCnPRAC": 1, "Voddball": 1}
+    assert summary["tasks"] == {"Aoddball": 1, "Voddball": 1}

@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from gripforce_io import (  # noqa: E402
     _assign_trial_idx,
+    filter_behavioral_trials,
     find_gripforce_files,
     load_gripforce_file,
     load_gripforce_long,
@@ -58,12 +59,30 @@ def test_load_gripforce_file_drops_short_epochs(tmp_path):
     assert df["task"].iloc[0] == "Aoddball"
 
 
+def test_load_gripforce_long_excludes_mvcnprac():
+    df = load_gripforce_long(FIXTURE_ROOT, min_rows_per_trial=50, sessions=None)
+    assert "MVCnPRAC" not in set(df["task"])
+    assert set(df["task"]) <= {"Aoddball", "Voddball"}
+
+
 def test_load_gripforce_long_on_fixtures():
     df = load_gripforce_long(FIXTURE_ROOT, min_rows_per_trial=50, sessions=None)
     assert not df.empty
     assert {"subject_id", "session_num", "run_num", "task", "trial_idx"}.issubset(df.columns)
-    assert df["subject_id"].nunique() >= 2
+    assert df["subject_id"].nunique() >= 1
     assert (df["trial_idx"] >= 1).all()
+
+
+def test_filter_behavioral_trials():
+    beh = pd.DataFrame(
+        {
+            "task_modality": ["Aoddball", "Voddball", "MVCnPRAC"],
+            "x": [1, 2, 3],
+        }
+    )
+    out = filter_behavioral_trials(beh)
+    assert len(out) == 2
+    assert "MVCnPRAC" not in set(out["task_modality"])
 
 
 def test_find_gripforce_files_session_filter():

@@ -260,9 +260,23 @@ def summarize_gripforce_file(path: Path) -> GripforceFileStats:
     )
 
 
-def find_gripforce_files(root: Path) -> list[Path]:
+def find_gripforce_files(
+    root: Path,
+    *,
+    exclude_tasks: tuple[str, ...] = ("MVCnPRAC",),
+) -> list[Path]:
     files = sorted(root.rglob(GRIPFORCE_GLOB))
-    return [path for path in files if "InsideScanner" in path.parts]
+    files = [path for path in files if "InsideScanner" in path.parts]
+    if not exclude_tasks:
+        return files
+    excluded = {task.upper() for task in exclude_tasks}
+    kept: list[Path] = []
+    for path in files:
+        match = GRIPFORCE_FILENAME_RE.search(path.name)
+        if match and match.group("task").upper() in excluded:
+            continue
+        kept.append(path)
+    return kept
 
 
 def write_csv(path: Path, rows: Iterable[dict[str, Any]], fieldnames: list[str]) -> None:
@@ -543,7 +557,7 @@ def infer_linkage_notes(tabular_files: list[dict[str, Any]]) -> list[str]:
     if has_run:
         notes.append("Run columns detected; align with gripforce runN in filenames.")
     if has_task:
-        notes.append("Task/condition columns detected; map to Aoddball, Voddball, MVCnPRAC.")
+        notes.append("Task/condition columns detected; map to Aoddball, Voddball.")
     if has_time:
         notes.append("Timestamp/onset columns detected; use absolute timestamp (col3) or elapsed time (col2) for alignment.")
     if not notes:
@@ -735,7 +749,7 @@ def render_markdown_report(
         [
             "## Recommended join strategy (initial)",
             "",
-            "1. Parse gripforce filenames for `BAP###`, `sessionN`, `runN`, and task (`Aoddball`, `Voddball`, `MVCnPRAC`).",
+            "1. Parse gripforce filenames for `BAP###`, `sessionN`, `runN`, and task (`Aoddball`, `Voddball`). MVCnPRAC excluded.",
             "2. Cross-check BIDS folders `sub-BAP###/ses-N/InsideScanner/`.",
             "3. Join behavioral tables on subject + session + run + task where available.",
             "4. For event-level alignment, map behavioral event onsets to gripforce column 2 (elapsed s) or column 3 (absolute timestamp s).",
