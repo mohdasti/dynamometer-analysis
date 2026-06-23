@@ -2,3 +2,4 @@
 
 gripforce_root: "/Users/mohdasti/Documents/LC-BAP/BAP/BAP data"
 behavioral_root: "/Users/mohdasti/Documents/LC-BAP/BAP/Nov2025"
+output_dir: "reports"

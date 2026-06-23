@@ -1,0 +1,4 @@
+subject_id,session,run,task,trial_onset_s,rt_ms,response
+BAP103,3,1,MVCnPRAC,1.2,450,1
+BAP001,1,2,Voddball,0.5,380,0
+BAP001,1,1,Aoddball,0.8,410,1

@@ -90,9 +90,9 @@ Expected linking keys: `sub-BAP###`, session, run, task name (`Aoddball`, `Voddb
 ## Suggested next steps for the agent
 
 1. Confirm both data paths exist and list `Nov2025` contents.
-2. Build a **data inventory** (subjects, sessions, tasks, file counts, run durations, peak force per file).
-3. Inspect `Nov2025` behavioral outputs and document join keys to gripforce files.
-4. Add a small Python or R script in this repo with configurable paths (env vars or `config/paths.yaml`).
+2. Run `python scripts/run_inventory.py` to build a **data inventory** (subjects, sessions, tasks, file counts, run durations, peak force per file).
+3. Inspect `Nov2025` behavioral outputs and document join keys to gripforce files (see `docs/DATA_LINKAGE.md` and generated `reports/dataset_inventory.md`).
+4. Paths are configured in `config/paths.local.yaml` (copy from `config/paths.example.yaml`).
 5. Produce a short summary report before any advanced analyses.
 
 ## Conventions

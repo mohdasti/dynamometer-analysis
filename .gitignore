@@ -1,4 +1,6 @@
 config/paths.local.yaml
+reports/gripforce_file_inventory.csv
+reports/dataset_inventory.md
 .DS_Store
 __pycache__/
 *.pyc

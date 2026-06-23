@@ -1,0 +1,3 @@
+gripforce_root: "tests/fixtures/BAP data"
+behavioral_root: "tests/fixtures/Nov2025"
+output_dir: "reports"
