@@ -1,4 +1,4 @@
-subject_id,session,run,task,trial_onset_s,rt_ms,response
-BAP103,3,1,MVCnPRAC,1.2,450,1
-BAP001,1,2,Voddball,0.5,380,0
-BAP001,1,1,Aoddball,0.8,410,1
+subject_id,mvc,session_num,run_num,run_datetime,task_modality,trial_num,grip_force_mean_au,grip_force_mean_prop_mvc,same_diff_resp_secs
+BAP103,12.5,3,1,2024-07-08 12:44:00,MVCnPRAC,1,11.2,0.896,1.45
+BAP001,10.0,1,2,2024-03-15 10:30:00,Voddball,1,1.1,0.55,0.38
+BAP001,10.0,1,1,2024-03-15 09:00:00,Aoddball,1,2.3,0.46,0.41

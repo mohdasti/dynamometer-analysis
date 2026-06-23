@@ -40,14 +40,19 @@ JOIN_KEY_HINTS = (
     "ses",
     "run",
     "task",
+    "modality",
     "condition",
     "trial",
     "block",
     "time",
+    "datetime",
     "timestamp",
     "onset",
+    "offset",
     "rt",
-    "response",
+    "resp",
+    "grip",
+    "mvc",
 )
 
 
