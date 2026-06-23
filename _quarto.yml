@@ -1,12 +1,32 @@
 project:
-  type: default
+  type: website
   render:
-    - analysis/*.qmd
+    - analysis/index.qmd
+    - analysis/01_ingest.qmd
+    - analysis/02_cognitive_motor_model.qmd
+    - analysis/03_hero_visuals.qmd
+
+website:
+  title: "BAP Gripforce — Cognitive–Motor Interference"
+  navbar:
+    left:
+      - href: index.qmd
+        text: Overview
+      - href: 01_ingest.qmd
+        text: Ingest & DSP
+      - href: 02_cognitive_motor_model.qmd
+        text: Modeling
+      - href: 03_hero_visuals.qmd
+        text: Visuals
 
 format:
   html:
     toc: true
-    code-fold: false
+    code-fold: true
+    code-summary: "View the underlying logic"
+    code-tools: true
+    theme: cosmo
+    smooth-scroll: true
 
 execute:
   freeze: auto

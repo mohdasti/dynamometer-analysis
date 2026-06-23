@@ -9,4 +9,21 @@ __pycache__/
 .venv/
 venv/
 
+# Quarto build artifacts
 /.quarto/
+_freeze/
+_site/
+
+# Rendered HTML (generated; not source of truth)
+analysis/*.html
+analysis/*_files/
+
+# R model objects (large binary; regenerate from qmd)
+reports/*.rds
+
+# Generated reports (CSV outputs from pipeline runs)
+reports/analysis_trial_table.csv
+reports/cognitive_motor_glmer_fixed_effects.csv
+reports/grip_attrition_funnel.csv
+reports/trial_coverage.csv
+reports/figures/

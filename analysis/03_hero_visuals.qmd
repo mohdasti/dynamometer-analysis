@@ -1,0 +1,493 @@
+---
+title: "BAP Gripforce — Hero Visualizations"
+author: "Mohd Dastgheib"
+format:
+  html:
+    toc: true
+    code-tools: true
+    code-fold: true
+    code-summary: "View the underlying logic"
+    theme: cosmo
+    fig-width: 9
+    fig-height: 10
+execute:
+  warning: false
+  message: false
+fig-format: png
+fig-dpi: 180
+---
+
+## Overview
+
+Portfolio-grade figures for quantitative UX / human-factors audiences:
+
+1. **Single-trial anatomy** — raw force, target-centered error, and rolling instability with probe-onset shading.
+2. **Behavioral lift** — adjusted accuracy as a function of tremor-band power, split by grip effort.
+
+Inputs: `reports/analysis_trial_table.csv` plus raw grip CSVs via `config/paths.local.yaml`.
+
+```{r}
+#| label: install-packages
+#| eval: false
+
+install.packages(c(
+  "ggplot2", "patchwork", "ggtext", "dplyr", "tidyr",
+  "scales", "lme4", "yaml", "stringr", "plotly", "htmlwidgets"
+))
+```
+
+```{r}
+#| label: setup
+
+suppressPackageStartupMessages({
+  library(ggplot2)
+  library(patchwork)
+  library(ggtext)
+  library(dplyr)
+  library(tidyr)
+  library(scales)
+  library(lme4)
+  library(yaml)
+  library(stringr)
+})
+
+has_plotly <- requireNamespace("plotly", quietly = TRUE) &&
+  requireNamespace("htmlwidgets", quietly = TRUE)
+
+repo <- normalizePath("..", winslash = "/", mustWork = TRUE)
+if (!file.exists(file.path(repo, "reports", "analysis_trial_table.csv"))) {
+  repo <- normalizePath(".", winslash = "/", mustWork = TRUE)
+}
+
+config_path <- file.path(repo, "config", "paths.local.yaml")
+if (!file.exists(config_path)) {
+  config_path <- file.path(repo, "config", "paths.example.yaml")
+}
+paths <- read_yaml(config_path)
+grip_root <- paths[["gripforce_root"]]
+model_path <- file.path(repo, "reports", "analysis_trial_table.csv")
+fig_dir <- file.path(repo, "reports", "figures")
+dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
+
+fs_hz <- 100
+trial_epoch_s <- 2.94
+probe_window_s <- 0.15
+
+okabe <- c(
+  "Low effort" = "#0072B2",
+  "High effort" = "#D55E00"
+)
+
+theme_hero <- function(base_size = 12) {
+  theme_minimal(base_size = base_size) +
+    theme(
+      panel.grid.minor = element_blank(),
+      panel.grid.major.x = element_blank(),
+      panel.grid.major.y = element_line(color = "grey90", linewidth = 0.35),
+      plot.title = element_markdown(face = "bold", size = rel(1.15), hjust = 0),
+      plot.subtitle = element_markdown(color = "grey35", size = rel(0.95), hjust = 0),
+      plot.caption = element_text(color = "grey45", size = rel(0.78), hjust = 0),
+      axis.title = element_text(color = "grey15", face = "plain"),
+      axis.text = element_text(color = "grey25"),
+      legend.position = "top",
+      legend.title = element_blank(),
+      plot.margin = margin(12, 16, 12, 12)
+    )
+}
+
+probe_rect <- function(stim_onset_s, width_s = probe_window_s) {
+  annotate(
+    "rect",
+    xmin = stim_onset_s,
+    xmax = stim_onset_s + width_s,
+    ymin = -Inf,
+    ymax = Inf,
+    fill = "#FFB000",
+    alpha = 0.18
+  )
+}
+
+panel_tag <- function(label) {
+  annotate(
+    "text",
+    x = -Inf, y = Inf,
+    label = label,
+    hjust = -0.15, vjust = 1.35,
+    fontface = "bold",
+    size = 4.2,
+    color = "grey20"
+  )
+}
+
+rolling_var <- function(x, window = 31) {
+  n <- length(x)
+  half <- window %/% 2
+  vapply(seq_len(n), function(i) {
+    lo <- max(1L, i - half)
+    hi <- min(n, i + half)
+    stats::var(x[lo:hi], na.rm = TRUE)
+  }, numeric(1))
+}
+
+find_grip_file <- function(subject_id, session_num, run_num, task, root) {
+  pattern <- sprintf(
+    "subject%s_%s_session%s_run%s_.*_gripforce\\.csv",
+    subject_id, task, session_num, run_num
+  )
+  hits <- list.files(root, pattern = pattern, full.names = TRUE, recursive = TRUE)
+  if (length(hits) == 0) {
+    stop("No gripforce file found for ", subject_id, " ", task, " session ", session_num)
+  }
+  hits[[1]]
+}
+
+load_trial_trace <- function(
+    subject_id,
+    session_num,
+    run_num,
+    trial_idx,
+    task,
+    mvc,
+    grip_targ_prop_mvc,
+    stim_offset_s,
+    root = grip_root,
+    fs = fs_hz,
+    min_rows_per_trial = 100) {
+  path <- find_grip_file(subject_id, session_num, run_num, task, root)
+  raw <- read.csv(
+    path,
+    header = FALSE,
+    col.names = c("marker", "elapsed_time", "abs_time", "raw_force")
+  )
+
+  task_upper <- toupper(task)
+  raw$grip_force_au <- if (task_upper %in% c("AODDBALL", "VODDBALL")) {
+    raw$marker
+  } else {
+    raw$raw_force
+  }
+
+  raw$epoch_idx <- cumsum(c(1, diff(raw$elapsed_time) < 0))
+  counts <- raw %>%
+    count(epoch_idx, name = "n_rows")
+  keep_epochs <- counts %>%
+    filter(n_rows >= min_rows_per_trial) %>%
+    arrange(epoch_idx) %>%
+    mutate(trial_idx = row_number())
+
+  trial <- raw %>%
+    inner_join(keep_epochs %>% select(epoch_idx, trial_idx), by = "epoch_idx") %>%
+    filter(trial_idx == !!trial_idx) %>%
+    arrange(elapsed_time)
+
+  if (nrow(trial) < 50) {
+    stop(
+      "Trial ", trial_idx, " in ", basename(path),
+      " has too few samples after segmentation (", nrow(trial), ")."
+    )
+  }
+
+  trial$t_rel_s <- trial$elapsed_time - trial$elapsed_time[1]
+  target_force <- grip_targ_prop_mvc * mvc
+  trial$target_force <- target_force
+  trial$normalized_error <- (trial$grip_force_au - target_force) / target_force
+  trial$rolling_var <- rolling_var(trial$normalized_error, window = 31)
+  trial$stim_onset_s <- stim_offset_s
+
+  trial
+}
+```
+
+## Visual 1 — Single-trial anatomy (time domain)
+
+```{r}
+#| label: visual-1-data
+
+model_tbl <- read.csv(model_path, stringsAsFactors = FALSE)
+
+hero_meta <- model_tbl %>%
+  filter(
+    task_modality == "vis",
+    tolower(as.character(is_high_grip)) == "true",
+    tolower(as.character(resp_is_correct)) == "false",
+    !is.na(pow_8_12hz)
+  ) %>%
+  arrange(desc(pow_8_12hz)) %>%
+  slice(1)
+
+trace <- load_trial_trace(
+  subject_id = hero_meta$subject_id,
+  session_num = hero_meta$session_num,
+  run_num = hero_meta$run_num,
+  trial_idx = hero_meta$trial_idx,
+  task = hero_meta$task,
+  mvc = hero_meta$mvc,
+  grip_targ_prop_mvc = hero_meta$grip_targ_prop_mvc,
+  stim_offset_s = hero_meta$probe_onset_s   # seconds into trial; NOT stim_offset for aud
+)
+
+trace_label <- sprintf(
+  "%s · %s · session %s · trial %s · incorrect response",
+  hero_meta$subject_id,
+  hero_meta$task_modality,
+  hero_meta$session_num,
+  hero_meta$trial_idx
+)
+```
+
+```{r}
+#| label: visual-1-anatomy
+#| fig-cap: "Single-trial grip-force anatomy aligned to probe onset."
+
+p_force <- ggplot(trace, aes(x = t_rel_s, y = grip_force_au)) +
+  geom_line(color = "#0072B2", linewidth = 0.75) +
+  geom_hline(
+    yintercept = hero_meta$grip_targ_prop_mvc * hero_meta$mvc,
+    linetype = "dashed",
+    color = "#999999",
+    linewidth = 0.45
+  ) +
+  probe_rect(hero_meta$stim_offset) +
+  panel_tag("A") +
+  scale_x_continuous(limits = c(0, trial_epoch_s), expand = c(0, 0)) +
+  labs(
+    x = NULL,
+    y = "Grip force (a.u.)"
+  ) +
+  theme_hero()
+
+p_error <- ggplot(trace, aes(x = t_rel_s, y = normalized_error)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "#666666", linewidth = 0.45) +
+  geom_line(color = "#009E73", linewidth = 0.75) +
+  probe_rect(hero_meta$stim_offset) +
+  panel_tag("B") +
+  scale_x_continuous(limits = c(0, trial_epoch_s), expand = c(0, 0)) +
+  labs(
+    x = NULL,
+    y = "Normalized error  (F - F_target) / F_target"
+  ) +
+  theme_hero()
+
+p_instability <- ggplot(trace, aes(x = t_rel_s, y = rolling_var)) +
+  geom_line(color = "#D55E00", linewidth = 0.8) +
+  probe_rect(hero_meta$stim_offset) +
+  panel_tag("C") +
+  scale_x_continuous(limits = c(0, trial_epoch_s), expand = c(0, 0)) +
+  scale_y_continuous(labels = label_number(accuracy = 0.001)) +
+  labs(
+    x = "Time within trial (s)",
+    y = "Rolling variance\n(instability)"
+  ) +
+  theme_hero()
+
+fig_anatomy <- p_force / p_error / p_instability +
+  plot_annotation(
+    title = "Single-Trial Grip Dynamics During Perceptual Decision",
+    subtitle = paste0(
+      trace_label,
+      "<br>Shaded band = probe onset window (*stim_offset* = ",
+      format(hero_meta$stim_offset, nsmall = 2),
+      " s); dashed line in **A** = grip target."
+    ),
+    theme = theme(
+      plot.title = element_markdown(face = "bold", size = 16, hjust = 0),
+      plot.subtitle = element_markdown(size = 11, color = "grey35", hjust = 0)
+    )
+  )
+
+fig_anatomy
+```
+
+```{r}
+#| label: visual-1-anatomy-interactive
+#| eval: !expr 'has_plotly && knitr::is_html_output()'
+
+if (has_plotly) {
+  plotly::subplot(
+    plotly::ggplotly(p_force, tooltip = "text") %>%
+      plotly::layout(hovermode = "x unified"),
+    plotly::ggplotly(p_error, tooltip = "text") %>%
+      plotly::layout(hovermode = "x unified"),
+    plotly::ggplotly(p_instability, tooltip = "text") %>%
+      plotly::layout(hovermode = "x unified"),
+    nrows = 3,
+    shareX = TRUE,
+    titleY = TRUE
+  ) %>%
+    plotly::layout(
+      title = list(
+        text = paste0(
+          "Single-Trial Grip Dynamics During Perceptual Decision<br>",
+          "<sup>", trace_label, " · hover to inspect time points</sup>"
+        ),
+        x = 0.01,
+        xanchor = "left"
+      ),
+      showlegend = FALSE
+    )
+}
+```
+
+```{r}
+#| label: save-visual-1
+#| include: false
+
+ggsave(
+  file.path(fig_dir, "hero_single_trial_anatomy.png"),
+  fig_anatomy,
+  width = 9,
+  height = 10,
+  dpi = 180,
+  bg = "white"
+)
+```
+
+## Visual 2 — Behavioral lift (DSP × effort)
+
+Adjusted marginal accuracy from a mixed model with tremor × grip interaction, controlling for modality and difficulty.
+
+```{r}
+#| label: visual-2-data
+
+viz_dat <- model_tbl %>%
+  filter(
+    !is.na(resp_is_correct),
+    !is.na(pow_8_12hz),
+    !is.na(pow_05_3hz)
+  ) %>%
+  mutate(
+    resp_is_correct = as.integer(tolower(as.character(resp_is_correct)) == "true"),
+    task_modality = factor(task_modality, levels = c("aud", "vis")),
+    stim_level_index = factor(stim_level_index, ordered = TRUE),
+    grip_effort = factor(
+      tolower(as.character(is_high_grip)) == "true",
+      levels = c(FALSE, TRUE),
+      labels = c("Low effort", "High effort")
+    ),
+    subject_id = factor(subject_id),
+    tremor_z = as.numeric(scale(pow_8_12hz))
+  )
+
+glmer_ctrl <- glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 2e5))
+
+m_lift <- glmer(
+  resp_is_correct ~ tremor_z * grip_effort + task_modality + stim_level_index +
+    (1 | subject_id),
+  data = viz_dat,
+  family = binomial(),
+  control = glmer_ctrl
+)
+
+tremor_grid <- seq(-2, 2, length.out = 60)
+pred_grid <- expand.grid(
+  tremor_z = tremor_grid,
+  grip_effort = levels(viz_dat$grip_effort),
+  task_modality = "vis",
+  stim_level_index = factor(2, levels = levels(viz_dat$stim_level_index), ordered = TRUE),
+  KEEP.OUT.ATTRS = FALSE,
+  stringsAsFactors = FALSE
+)
+pred_grid$grip_effort <- factor(pred_grid$grip_effort, levels = levels(viz_dat$grip_effort))
+pred_grid$task_modality <- factor(pred_grid$task_modality, levels = levels(viz_dat$task_modality))
+
+pred_grid$pred_acc <- predict(m_lift, newdata = pred_grid, type = "response", re.form = NA)
+
+# Empirical bins for overlay
+viz_bins <- viz_dat %>%
+  mutate(tremor_bin = cut(
+    tremor_z,
+    breaks = seq(-2.5, 2.5, by = 1),
+    labels = c("< −1.5", "−1.5 to −0.5", "−0.5 to 0.5", "0.5 to 1.5", "> 1.5")
+  )) %>%
+  group_by(grip_effort, tremor_bin) %>%
+  summarise(
+    acc = mean(resp_is_correct),
+    se = sqrt(acc * (1 - acc) / n()),
+    tremor_mid = mean(tremor_z),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  filter(n >= 25)
+```
+
+```{r}
+#| label: visual-2-lift
+#| fig-cap: "Population-level accuracy as a function of tremor-band power, split by grip effort."
+
+fig_lift <- ggplot() +
+  geom_line(
+    data = pred_grid,
+    aes(x = tremor_z, y = pred_acc, color = grip_effort, linewidth = grip_effort)
+  ) +
+  geom_pointrange(
+    data = viz_bins,
+    aes(x = tremor_mid, y = acc, ymin = pmax(acc - 1.96 * se, 0), ymax = pmin(acc + 1.96 * se, 1),
+        color = grip_effort),
+    linewidth = 0.35,
+    fatten = 2.2,
+    alpha = 0.85,
+    inherit.aes = FALSE
+  ) +
+  scale_color_manual(values = okabe) +
+  scale_linewidth_manual(values = c("Low effort" = 0.7, "High effort" = 1.1), guide = "none") +
+  scale_x_continuous(
+    breaks = seq(-2, 2, by = 1),
+    labels = function(x) ifelse(x > 0, paste0("+", x), as.character(x))
+  ) +
+  scale_y_continuous(
+    labels = label_percent(accuracy = 1),
+    limits = c(0.35, 0.85),
+    expand = expansion(mult = c(0.02, 0.02))
+  ) +
+  labs(
+    title = "High-Frequency Motor Instability Predicts Perceptual Errors Under Physical Load",
+    subtitle = "Marginal accuracy from mixed-effects model (modality + difficulty adjusted; population-level predictions)",
+    x = "Physiological tremor power, 8–12 Hz (within-subject z-score)",
+    y = "Predicted perceptual accuracy",
+    caption = paste0(
+      "Lines: fixed-effects predictions from tremor × grip interaction model (n = ",
+      format(nrow(viz_dat), big.mark = ","),
+      " trials). Points: binned observed accuracy ± 95% CI (bins with n ≥ 25)."
+    )
+  ) +
+  theme_hero() +
+  theme(legend.position = c(0.82, 0.88))
+
+fig_lift
+```
+
+```{r}
+#| label: visual-2-lift-interactive
+#| eval: !expr 'has_plotly && knitr::is_html_output()'
+
+if (has_plotly) {
+  plotly::ggplotly(fig_lift, tooltip = "text") %>%
+    plotly::layout(
+      hovermode = "closest",
+      legend = list(x = 0.72, y = 0.95)
+    )
+}
+```
+
+```{r}
+#| label: save-visual-2
+#| include: false
+
+ggsave(
+  file.path(fig_dir, "hero_tremor_accuracy_lift.png"),
+  fig_lift,
+  width = 9,
+  height = 5.5,
+  dpi = 180,
+  bg = "white"
+)
+```
+
+## Export summary
+
+```{r}
+#| label: export-summary
+
+cat("Saved figures to:", fig_dir, "\n")
+list.files(fig_dir, pattern = "^hero_.*\\.png$", full.names = TRUE)
+```

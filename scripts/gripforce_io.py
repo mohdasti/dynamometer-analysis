@@ -17,7 +17,17 @@ GRIPFORCE_FILENAME_RE = re.compile(
 )
 
 COLUMN_NAMES = ("marker", "elapsed_time", "abs_time", "raw_force")
+# Analysis force trace: oddball col1 (marker); MVCnPRAC col4 (raw_force).
+FORCE_COLUMN = "grip_force_au"
+ODDBALL_TASKS = frozenset({"AODDBALL", "VODDBALL"})
 DEFAULT_EXCLUDE_TASKS = ("MVCnPRAC",)
+TASK_MODALITY_MAP = {"Aoddball": "aud", "Voddball": "vis"}
+EXPECTED_TRIALS_PER_TASK = 150
+EXPECTED_TRIALS_PER_RUN = 30
+EXPECTED_RUNS_PER_TASK = 5
+EXPECTED_GRIP_PER_LEVEL = 75
+# Subject-tasks below this trial count after v3 cleaning are treated as mid-task aborts.
+ABORT_TRIAL_THRESHOLD = 100
 
 
 def parse_gripforce_filename(path: Path) -> dict[str, str | int]:
@@ -83,6 +93,34 @@ def _load_raw_gripforce_csv(path: Path) -> pd.DataFrame:
     return df
 
 
+def _attach_force_column(df: pd.DataFrame, *, task: str) -> pd.DataFrame:
+    """
+    Map the 100 Hz force trace into ``FORCE_COLUMN``.
+
+    Oddball CSVs store continuous force in col1 (``marker``); col4 (``raw_force``)
+    is a per-trial block code. MVCnPRAC files use col4 as force.
+    """
+    out = df.copy()
+    if task.upper() in ODDBALL_TASKS:
+        out[FORCE_COLUMN] = out["marker"].astype(np.float64)
+    else:
+        out[FORCE_COLUMN] = out["raw_force"].astype(np.float64)
+    return out
+
+
+def _output_columns() -> tuple[str, ...]:
+    return (
+        "subject_id",
+        "session_num",
+        "run_num",
+        "task",
+        "trial_idx",
+        *COLUMN_NAMES,
+        FORCE_COLUMN,
+        "source_file",
+    )
+
+
 def _assign_trial_idx(elapsed_time: np.ndarray) -> np.ndarray:
     """Label rows with sequential trial_idx; increment when elapsed_time resets."""
     n = len(elapsed_time)
@@ -114,7 +152,15 @@ def _segment_run(
 
     trial_counts = out.groupby("trial_idx", sort=True).size()
     keep_trials = trial_counts[trial_counts >= min_rows_per_trial].index
-    return out[out["trial_idx"].isin(keep_trials)].reset_index(drop=True)
+    out = out[out["trial_idx"].isin(keep_trials)].copy()
+    if out.empty:
+        return out.reset_index(drop=True)
+
+    trial_remap = {
+        old: new for new, old in enumerate(sorted(keep_trials), start=1)
+    }
+    out["trial_idx"] = out["trial_idx"].map(trial_remap)
+    return out.reset_index(drop=True)
 
 
 def load_gripforce_file(
@@ -125,7 +171,7 @@ def load_gripforce_file(
     """Load one gripforce CSV, segment trials, attach run metadata."""
     csv_path = Path(path)
     meta = parse_gripforce_filename(csv_path)
-    raw = _load_raw_gripforce_csv(csv_path)
+    raw = _attach_force_column(_load_raw_gripforce_csv(csv_path), task=meta["task"])
     segmented = _segment_run(raw, min_rows_per_trial=min_rows_per_trial)
 
     for key, value in meta.items():
@@ -158,26 +204,17 @@ def load_gripforce_long(
     Returns
     -------
     pd.DataFrame
-        Columns: marker, elapsed_time, abs_time, raw_force, trial_idx,
-        subject_id, session_num, run_num, task, source_file.
+        Columns: marker, elapsed_time, abs_time, raw_force, grip_force_au,
+        trial_idx, subject_id, session_num, run_num, task, source_file.
     """
     files = find_gripforce_files(
         gripforce_root,
         sessions=sessions,
         exclude_tasks=exclude_tasks,
     )
+    out_cols = _output_columns()
     if not files:
-        return pd.DataFrame(
-            columns=[
-                *COLUMN_NAMES,
-                "trial_idx",
-                "subject_id",
-                "session_num",
-                "run_num",
-                "task",
-                "source_file",
-            ]
-        )
+        return pd.DataFrame(columns=[c for c in out_cols if c != "source_file"])
 
     frames: list[pd.DataFrame] = []
     for path in files:
@@ -189,29 +226,10 @@ def load_gripforce_long(
             warnings.warn(f"Skipping {path}: {exc}", stacklevel=2)
 
     if not frames:
-        return pd.DataFrame(
-            columns=[
-                *COLUMN_NAMES,
-                "trial_idx",
-                "subject_id",
-                "session_num",
-                "run_num",
-                "task",
-                "source_file",
-            ]
-        )
+        return pd.DataFrame(columns=[c for c in out_cols if c != "source_file"])
 
     out = pd.concat(frames, ignore_index=True)
-    col_order = [
-        "subject_id",
-        "session_num",
-        "run_num",
-        "task",
-        "trial_idx",
-        *COLUMN_NAMES,
-        "source_file",
-    ]
-    return out[col_order]
+    return out[list(out_cols)]
 
 
 def filter_behavioral_trials(
@@ -225,3 +243,232 @@ def filter_behavioral_trials(
         return beh
     excluded = set(exclude_tasks)
     return beh.loc[~beh[task_col].isin(excluded)].reset_index(drop=True)
+
+
+def _grip_trial_keys(
+    grip: pd.DataFrame,
+    *,
+    task_map: dict[str, str],
+) -> pd.DataFrame:
+    """One row per grip trial; fatigue-break runs merged when aggregating."""
+    labeled = grip.assign(task_modality=grip["task"].map(task_map))
+    trial_keys = ["subject_id", "session_num", "run_num", "trial_idx", "task_modality"]
+    return labeled[trial_keys].drop_duplicates()
+
+
+def _count_grip_trials(
+    grip: pd.DataFrame,
+    *,
+    task_map: dict[str, str] | None = None,
+    group_cols: tuple[str, ...] = ("subject_id", "task_modality"),
+) -> pd.DataFrame:
+    task_map = task_map or TASK_MODALITY_MAP
+    if grip.empty:
+        return pd.DataFrame(columns=[*group_cols, "grip_trials"])
+
+    trials = _grip_trial_keys(grip, task_map=task_map)
+    return (
+        trials.groupby(list(group_cols), as_index=False)
+        .size()
+        .rename(columns={"size": "grip_trials"})
+    )
+
+
+def _count_beh_trials(
+    beh: pd.DataFrame,
+    *,
+    group_cols: tuple[str, ...] = ("subject_id", "task_modality"),
+) -> pd.DataFrame:
+    if beh.empty:
+        return pd.DataFrame(columns=[*group_cols, "beh_trials", "beh_high", "beh_low"])
+
+    return (
+        beh.groupby(list(group_cols), as_index=False)
+        .agg(
+            beh_trials=("trial_num", "count"),
+            beh_high=("grip_level", lambda s: int((s == "high").sum())),
+            beh_low=("grip_level", lambda s: int((s == "low").sum())),
+        )
+    )
+
+
+def summarize_join_trial_counts(
+    grip: pd.DataFrame,
+    beh: pd.DataFrame,
+    merged: pd.DataFrame | None = None,
+    *,
+    task_map: dict[str, str] | None = None,
+) -> dict[str, int]:
+    """
+    Headline trial counts after merging fatigue-break runs within each session.
+
+    Each row in ``beh`` is one trial. Grip trials are unique
+    (subject, session, run, trial_idx) combinations rolled up across runs.
+    """
+    task_map = task_map or TASK_MODALITY_MAP
+
+    beh_trials = len(beh)
+    grip_trials = 0 if grip.empty else len(_grip_trial_keys(grip, task_map=task_map))
+
+    out = {
+        "behavioral_trials": beh_trials,
+        "grip_trials_on_disk": grip_trials,
+        "matched_trials": 0,
+        "matched_samples": 0,
+        "grip_samples": len(grip),
+    }
+    if merged is not None and not merged.empty:
+        out["matched_samples"] = len(merged)
+        out["matched_trials"] = merged.drop_duplicates(
+            ["subject_id", "session_num", "run_num", "trial_idx"]
+        ).shape[0]
+    elif merged is not None:
+        out["matched_samples"] = 0
+        out["matched_trials"] = 0
+    return out
+
+
+def summarize_trial_coverage(
+    grip: pd.DataFrame,
+    beh: pd.DataFrame,
+    *,
+    feat: pd.DataFrame | None = None,
+    task_map: dict[str, str] | None = None,
+    group_cols: tuple[str, ...] = ("subject_id", "task_modality"),
+) -> pd.DataFrame:
+    """
+    Compare merged trial counts per subject × task against the study design.
+
+    Fatigue-break runs (typically 5 × 30 trials) are **merged** before counting.
+    The unit of interest is the **trial**, not the run file.
+
+    Interpretation
+    --------------
+    * ``beh_complete`` — full design: 150 trials with 75 high / 75 low grip.
+    * ``drop_aborted`` — subject-task likely stopped mid-collection (``beh_trials``
+      below ``ABORT_TRIAL_THRESHOLD``). Drop at the participant-task level.
+    * ``beh_retainable`` — subject-task with enough behavioral data to keep; individual
+      missing responses are already handled by v3 trial filters.
+    * ``grip_has_files`` / ``grip_trials`` — grip trials on disk (runs merged),
+      separate from behavioral quality.
+    """
+    task_map = task_map or TASK_MODALITY_MAP
+
+    beh_summary = _count_beh_trials(beh, group_cols=group_cols)
+    grip_summary = _count_grip_trials(grip, task_map=task_map, group_cols=group_cols)
+
+    out = beh_summary.merge(grip_summary, on=list(group_cols), how="outer")
+    out["beh_trials"] = out["beh_trials"].fillna(0).astype(np.int64)
+    out["beh_high"] = out["beh_high"].fillna(0).astype(np.int64)
+    out["beh_low"] = out["beh_low"].fillna(0).astype(np.int64)
+    out["grip_trials"] = out["grip_trials"].fillna(0).astype(np.int64)
+
+    if feat is not None and not feat.empty:
+        if "task_modality" not in feat.columns:
+            feat_labeled = feat.merge(
+                grip.assign(task_modality=grip["task"].map(task_map))[
+                    ["subject_id", "session_num", "run_num", "trial_idx", "task_modality"]
+                ].drop_duplicates(),
+                on=["subject_id", "session_num", "run_num", "trial_idx"],
+                how="left",
+            )
+        else:
+            feat_labeled = feat
+        feat_trials = (
+            feat_labeled.groupby(list(group_cols), as_index=False)
+            .size()
+            .rename(columns={"size": "feat_trials"})
+        )
+        out = out.merge(feat_trials, on=list(group_cols), how="left")
+        out["feat_trials"] = out["feat_trials"].fillna(0).astype(np.int64)
+    else:
+        out["feat_trials"] = np.int64(0)
+
+    out["beh_complete"] = (
+        (out["beh_trials"] == EXPECTED_TRIALS_PER_TASK)
+        & (out["beh_high"] == EXPECTED_GRIP_PER_LEVEL)
+        & (out["beh_low"] == EXPECTED_GRIP_PER_LEVEL)
+    )
+    out["retention_pct"] = 100.0 * out["beh_trials"] / EXPECTED_TRIALS_PER_TASK
+    out["drop_aborted"] = out["beh_trials"] < ABORT_TRIAL_THRESHOLD
+    out["beh_retainable"] = ~out["drop_aborted"]
+    out["grip_has_files"] = out["grip_trials"] > 0
+    out["grip_complete"] = out["grip_trials"] == EXPECTED_TRIALS_PER_TASK
+    out["feat_complete"] = out["feat_trials"] == EXPECTED_TRIALS_PER_TASK
+    out["analysis_ready"] = (
+        out["beh_retainable"] & out["grip_has_files"] & (out["feat_trials"] > 0)
+    )
+    out["beh_minus_grip"] = out["beh_trials"] - out["grip_trials"]
+    out["grip_minus_feat"] = out["grip_trials"] - out["feat_trials"]
+    out["feat_match_pct"] = np.where(
+        out["beh_trials"] > 0,
+        100.0 * out["feat_trials"] / out["beh_trials"],
+        np.nan,
+    )
+    return out.sort_values(list(group_cols)).reset_index(drop=True)
+
+
+def summarize_grip_trial_counts(
+    grip: pd.DataFrame,
+    *,
+    group_cols: tuple[str, ...] = ("subject_id", "session_num", "task_modality"),
+    task_map: dict[str, str] | None = None,
+) -> pd.DataFrame:
+    """Trial counts from gripforce, merging fatigue-break runs via ``group_cols``."""
+    return _count_grip_trials(grip, task_map=task_map, group_cols=group_cols)
+
+
+def grip_attrition_funnel(coverage: pd.DataFrame) -> pd.DataFrame:
+    """
+    Stage counts for a CONSORT-style grip force analysis flow diagram.
+
+    Reports both subject-task rows and **merged trial totals** at each stage.
+    """
+    retainable = coverage.loc[coverage["beh_retainable"]]
+    with_grip = retainable.loc[retainable["grip_has_files"]]
+    analysis = coverage.loc[coverage["analysis_ready"]]
+
+    return pd.DataFrame(
+        [
+            {
+                "stage": "Oddball subject-tasks in behavioral v3",
+                "n_subject_tasks": len(coverage),
+                "n_trials": int(coverage["beh_trials"].sum()),
+                "note": "aud + vis; runs merged into trial counts",
+            },
+            {
+                "stage": "Excluded: aborted mid-task",
+                "n_subject_tasks": int(coverage["drop_aborted"].sum()),
+                "n_trials": int(
+                    coverage.loc[coverage["drop_aborted"], "beh_trials"].sum()
+                ),
+                "note": f"beh_trials < {ABORT_TRIAL_THRESHOLD}",
+            },
+            {
+                "stage": "Retainable subject-tasks",
+                "n_subject_tasks": len(retainable),
+                "n_trials": int(retainable["beh_trials"].sum()),
+                "note": "individual missed trials already removed in v3",
+            },
+            {
+                "stage": "Missing gripforce trials on disk",
+                "n_subject_tasks": int((retainable["grip_has_files"] == False).sum()),  # noqa: E712
+                "n_trials": int(
+                    retainable.loc[~retainable["grip_has_files"], "beh_trials"].sum()
+                ),
+                "note": "behavioral trials without matching grip files",
+            },
+            {
+                "stage": "Gripforce trials on disk",
+                "n_subject_tasks": len(with_grip),
+                "n_trials": int(with_grip["grip_trials"].sum()),
+                "note": "fatigue-break runs merged per session",
+            },
+            {
+                "stage": "Analysis set (trial features extracted)",
+                "n_subject_tasks": len(analysis),
+                "n_trials": int(analysis["feat_trials"].sum()),
+                "note": "primary grip force modeling cohort",
+            },
+        ]
+    )

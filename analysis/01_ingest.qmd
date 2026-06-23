@@ -5,12 +5,19 @@ format:
   html:
     toc: true
     code-tools: true
+    code-fold: true
+    code-summary: "View the underlying logic"
+    theme: cosmo
 jupyter: python3
 ---
 
 ## Overview
 
-This document loads raw in-scanner dynamometer data (100 Hz), segments it into trial epochs, and previews the result. Raw data stay outside git; paths come from `config/paths.local.yaml`.
+This document loads raw in-scanner dynamometer data (100 Hz), segments it into trial epochs, joins behavioral trial metadata, extracts trial-level spectral grip features, and builds `model_df` for grip force modeling. Raw data stay outside git; paths come from `config/paths.local.yaml`.
+
+Missing gripforce files are tracked for a future CONSORT-style flow diagram; they do not invalidate retainable behavioral data.
+
+> **Notebook version:** `2026-06-23-trial-counts` — if you do not see `summarize_join_trial_counts` in Setup, close this file and re-open from disk (Positron may be showing an unsaved older buffer).
 
 **Analysis scope:** Auditory and visual oddball tasks only (`Aoddball`, `Voddball`). **MVCnPRAC** calibration/practice runs are excluded — subject MVC for normalization comes from the behavioral table (`mvc` column in v3).
 
@@ -36,7 +43,21 @@ if not (REPO / "scripts" / "gripforce_io.py").exists():
 
 sys.path.insert(0, str(REPO / "scripts"))
 
-from gripforce_io import DEFAULT_EXCLUDE_TASKS, filter_behavioral_trials, load_gripforce_long
+from gripforce_features import extract_trial_spectral_features
+from gripforce_io import (
+    ABORT_TRIAL_THRESHOLD,
+    DEFAULT_EXCLUDE_TASKS,
+    EXPECTED_GRIP_PER_LEVEL,
+    EXPECTED_TRIALS_PER_TASK,
+    FORCE_COLUMN,
+    TASK_MODALITY_MAP,
+    filter_behavioral_trials,
+    grip_attrition_funnel,
+    load_gripforce_long,
+    summarize_grip_trial_counts,
+    summarize_join_trial_counts,
+    summarize_trial_coverage,
+)
 
 config_path = REPO / "config" / "paths.local.yaml"
 if not config_path.exists():
@@ -58,7 +79,7 @@ print(f"Excluded tasks: {DEFAULT_EXCLUDE_TASKS}")
 
 ## Load & segment gripforce
 
-Each CSV is one **run**. Trials are split when `elapsed_time` (col2) resets. Trials with fewer than 100 samples (~1 s) are dropped as edge artifacts.
+Each CSV is one fatigue-break **run** (administrative split only). Trials are split when `elapsed_time` (col2) resets. Trials with fewer than 100 samples (~1 s) are dropped as edge artifacts. All trial counts below **merge runs** within each session.
 
 ```{python}
 #| label: ingest-gripforce
@@ -71,30 +92,26 @@ grip = load_gripforce_long(
     exclude_tasks=DEFAULT_EXCLUDE_TASKS,
 )
 
-print(f"Rows: {len(grip):,}")
-print(f"Runs: {grip['source_file'].nunique()}")
+print(f"Grip samples: {len(grip):,}  (100 Hz timepoints, not trials)")
 print(f"Subjects: {grip['subject_id'].nunique()}")
-print(f"Tasks: {sorted(grip['task'].unique())}")
+print(f"Tasks: {sorted(grip['task'].unique())}  →  maps to aud / vis in behavioral v3")
 grip.head(10)
 ```
 
-## Quick summaries
+## Grip trial totals (runs merged per session)
 
 ```{python}
-#| label: summaries
+#| label: grip-trial-totals
 
-run_summary = (
-    grip.groupby(["subject_id", "session_num", "run_num", "task"], as_index=False)
-    .agg(
-        n_trials=("trial_idx", "nunique"),
-        n_samples=("raw_force", "size"),
-        force_mean=("raw_force", "mean"),
-        force_max=("raw_force", "max"),
-    )
-    .sort_values(["subject_id", "session_num", "run_num", "task"])
+grip_by_session = summarize_grip_trial_counts(
+    grip,
+    group_cols=("subject_id", "session_num", "task_modality"),
 )
+grip_by_task = summarize_grip_trial_counts(grip)
 
-run_summary.head(10)
+print(f"Grip trials on disk (all sessions, runs merged): {grip_by_session['grip_trials'].sum():,.0f}")
+print(f"Subject-task pairs with grip data: {len(grip_by_task.loc[grip_by_task['grip_trials'] > 0])}")
+grip_by_session.head(10)
 ```
 
 ## Load behavioral & join
@@ -111,15 +128,274 @@ merged = grip.merge(
     right_on=["subject_id", "session_num", "run_num", "trial_num"],
     how="inner",
 )
-print(f"Behavior rows (oddball only): {len(beh):,}")
-print(f"Merged rows: {len(merged):,}")
+
+join_counts = summarize_join_trial_counts(grip, beh, merged)
+
+print("Task labels: Aoddball → aud, Voddball → vis (same tasks, different names)")
+print("—" * 60)
+print("TRIAL COUNTS (fatigue-break runs merged; this is what matters)")
+for label, value in join_counts.items():
+    print(f"  {label}: {value:,}")
+print("—" * 60)
+print(
+    f"Match rate: {100 * join_counts['matched_trials'] / join_counts['grip_trials_on_disk']:.1f}% "
+    "of grip trials have behavioral metadata"
+)
+
 merged.head()
+```
+
+## Trial count sanity checks
+
+Design expectation: **150 trials** per subject per task (`aud` / `vis`), with **75 high** + **75 low** grip. The 5 run files per session are a fatigue break only — all counts below **merge runs into trial totals**.
+
+**QC policy:** Individual missed responses are fine — v3 already removes bad trials. Drop a participant-task only when collection likely **aborted mid-task** (fewer than 100 behavioral trials after cleaning; see `ABORT_TRIAL_THRESHOLD`). Missing gripforce files are tracked as **file attrition** for a CONSORT-style diagram in methods — analyze what is on disk.
+
+```{python}
+#| label: trial-coverage
+
+coverage = summarize_trial_coverage(grip, beh)
+coverage_by_session = summarize_trial_coverage(
+    grip,
+    beh,
+    group_cols=("subject_id", "session_num", "task_modality"),
+)
+
+retainable = coverage.loc[coverage["beh_retainable"]]
+
+design_checks = {
+    "behavioral_trials_total": int(coverage["beh_trials"].sum()),
+    "grip_trials_on_disk_total": int(coverage["grip_trials"].sum()),
+    "subject_tasks_in_behavior": len(coverage),
+    "retainable_subject_tasks": int(coverage["beh_retainable"].sum()),
+    "retainable_behavioral_trials": int(retainable["beh_trials"].sum()),
+    "drop_aborted_mid_task": int(coverage["drop_aborted"].sum()),
+    f"retainable_near_design_140_{EXPECTED_TRIALS_PER_TASK}_trials_per_subject_task": int(
+        retainable["beh_trials"].between(140, EXPECTED_TRIALS_PER_TASK).sum()
+    ),
+    "grip_trials_on_disk_total_retainable": int(
+        retainable["grip_trials"].sum()
+    ),
+}
+pd.Series(design_checks, name="count")
+```
+
+Per session (runs merged):
+
+```{python}
+#| label: trial-coverage-by-session
+
+coverage_by_session.loc[
+    coverage_by_session["grip_trials"] > 0,
+    ["subject_id", "session_num", "task_modality", "beh_trials", "grip_trials"],
+].head(15)
+```
+
+```{python}
+#| label: trial-coverage-flags
+
+aborted = coverage.loc[coverage["drop_aborted"]].sort_values("beh_trials")
+missing_grip = coverage.loc[coverage["beh_retainable"] & ~coverage["grip_has_files"]]
+partial_grip = coverage.loc[
+    coverage["beh_retainable"] & coverage["grip_has_files"] & ~coverage["grip_complete"]
+]
+
+print(f"Drop (aborted mid-task, beh_trials < {ABORT_TRIAL_THRESHOLD}): {len(aborted)}")
+print(f"Retainable but no grip trials on disk: {len(missing_grip)}")
+print(f"Retainable with partial grip trials (<{EXPECTED_TRIALS_PER_TASK}): {len(partial_grip)}")
+print("(Analysis-ready trial count is printed after spectral features are extracted.)")
+
+coverage.loc[
+    coverage["drop_aborted"],
+    ["subject_id", "task_modality", "beh_trials", "grip_trials", "retention_pct"],
+]
+```
+
+## Trial spectral features
+
+### Normalization (target-centered, unitless)
+
+Per sample within each trial:
+
+$$
+e(t) = \frac{F(t) - F_{\text{target}}}{F_{\text{target}}}, \quad F_{\text{target}} = \text{grip\_targ\_prop\_mvc} \times \text{mvc}
+$$
+
+$F(t)$ is `grip_force_au` (100 Hz trace; column 1 on oddball CSVs). This removes macro-level grip amplitude differences **before** spectral analysis so high- vs low-effort trials are compared on tracking quality, not raw Newtons.
+
+### DSP pipeline (anti-contamination)
+
+1. **RMS tracking error:** $\text{rms\_error} = \sqrt{\mathrm{mean}(e(t)^2)}$
+2. **Linear detrend:** remove slow within-trial drift (`scipy.signal.detrend`)
+3. **Zero-phase high-pass:** 4th-order Butterworth at **0.5 Hz** via `sosfiltfilt` — preserves tremor-burst timing relative to probe onset (critical for hero visuals)
+4. **Welch PSD** → integrate **0.5–3 Hz** (visuomotor tracking) and **8–12 Hz** (physiological tremor)
+
+Implementation: `scripts/gripforce_features.py` (`_prepare_spectral_signal`, `_highpass_sosfiltfilt`).
+
+```{python}
+#| label: spectral-features
+
+trial_features = extract_trial_spectral_features(grip, beh)
+
+coverage = summarize_trial_coverage(grip, beh, feat=trial_features)
+
+print(f"Trials with spectral features: {len(trial_features):,}")
+print(f"Analysis-ready trials: {coverage.loc[coverage['analysis_ready'], 'feat_trials'].sum():,.0f}")
+print(f"Analysis-ready subject-tasks: {coverage['analysis_ready'].sum()} / {len(coverage)}")
+print(f"Analysis-ready subjects: {coverage.loc[coverage['analysis_ready'], 'subject_id'].nunique()}")
+trial_features.describe()
+```
+
+```{python}
+#| label: spectral-features-preview
+
+trial_features.head(10)
+```
+
+## Grip analysis cohort & attrition log
+
+Primary modeling cohort: subject-tasks with gripforce on disk and extracted features (`analysis_ready`). Save the coverage table and stage counts for a CONSORT-style figure in the paper.
+
+```{python}
+#| label: grip-cohort
+
+attrition = grip_attrition_funnel(coverage)
+analysis_cohort = coverage.loc[coverage["analysis_ready"]].copy()
+
+print(attrition.to_string(index=False))
+print(
+    f"\nAnalysis set: {analysis_cohort['feat_trials'].sum():,.0f} trials, "
+    f"{len(analysis_cohort)} subject-tasks, "
+    f"{analysis_cohort['subject_id'].nunique()} subjects"
+)
+
+coverage_path = REPO / "reports" / "trial_coverage.csv"
+attrition_path = REPO / "reports" / "grip_attrition_funnel.csv"
+coverage_path.parent.mkdir(parents=True, exist_ok=True)
+coverage.to_csv(coverage_path, index=False)
+attrition.to_csv(attrition_path, index=False)
+print(f"\nWrote {coverage_path.relative_to(REPO)}")
+print(f"Wrote {attrition_path.relative_to(REPO)}")
+```
+
+## Build modeling dataset
+
+Filter spectral features to the analysis cohort (`analysis_ready`) and merge trial-level behavioral outcomes from v3.
+
+```{python}
+#| label: build-model-df
+
+analysis_keys = coverage.loc[coverage["analysis_ready"], ["subject_id", "task_modality"]]
+
+grip_trial_keys = (
+    grip[["subject_id", "session_num", "run_num", "trial_idx", "task"]]
+    .drop_duplicates()
+    .assign(task_modality=lambda d: d["task"].map(TASK_MODALITY_MAP))
+)
+
+trial_features_labeled = trial_features.merge(
+    grip_trial_keys,
+    on=["subject_id", "session_num", "run_num", "trial_idx"],
+)
+
+grip_trial_mean = (
+    grip.groupby(["subject_id", "session_num", "run_num", "trial_idx"], as_index=False)
+    .agg(grip_force_mean=(FORCE_COLUMN, "mean"))
+)
+
+# Drop task_modality from beh to avoid task_modality_x / task_modality_y after merge
+beh_outcomes = beh.drop(columns=["task_modality"]).copy()
+
+# stim_offset has different semantics per modality:
+#   vis → temporal probe onset within trial (seconds; 0, 0.06, 0.12, 0.24, 0.48)
+#   aud → frequency shift of oddball tone (Hz; 0, 8, 16, 32, 64) — NOT temporal
+# Add probe_onset_s: the actual seconds-into-trial when the oddball probe appears.
+# For aud, probe appears at t=0 (confirmed: RT distribution fits within ~2.94s epoch
+# only if probe onset is at trial start; stim_offset encodes difficulty, not timing).
+beh_outcomes["probe_onset_s"] = beh_outcomes["stim_offset"].where(
+    beh_outcomes.index.isin(beh[beh["task_modality"] == "vis"].index),
+    other=0.0,
+)
+# Re-map after drop — use task col from grip_trial_keys instead
+# (beh_outcomes lost task_modality above; use a lookup from beh directly)
+_probe_lookup = beh[["subject_id", "session_num", "run_num", "trial_num",
+                      "task_modality", "stim_offset"]].copy()
+_probe_lookup["probe_onset_s"] = _probe_lookup["stim_offset"].where(
+    _probe_lookup["task_modality"] == "vis", other=0.0
+)
+beh_outcomes = beh_outcomes.drop(columns=["probe_onset_s"], errors="ignore")
+beh_outcomes = beh_outcomes.merge(
+    _probe_lookup[["subject_id", "session_num", "run_num", "trial_num", "probe_onset_s"]],
+    on=["subject_id", "session_num", "run_num", "trial_num"],
+    how="left",
+)
+
+model_df = trial_features_labeled.merge(analysis_keys, on=["subject_id", "task_modality"])
+model_df = model_df.merge(
+    beh_outcomes,
+    left_on=["subject_id", "session_num", "run_num", "trial_idx"],
+    right_on=["subject_id", "session_num", "run_num", "trial_num"],
+    how="inner",
+)
+model_df = model_df.merge(
+    grip_trial_mean,
+    on=["subject_id", "session_num", "run_num", "trial_idx"],
+)
+
+print(f"Modeling trials: {len(model_df):,}")
+print(f"Subjects: {model_df['subject_id'].nunique()}")
+print(f"Tasks: {sorted(model_df['task_modality'].unique())}")
+print(f"Grip levels: {sorted(model_df['grip_level'].unique())}")
+
+model_df[
+    [
+        "subject_id",
+        "task_modality",
+        "session_num",
+        "run_num",
+        "trial_idx",
+        "grip_level",
+        "rms_error",
+        "pow_05_3hz",
+        "pow_8_12hz",
+        "resp_is_correct",
+        "same_diff_resp_secs",
+        "confidence_resp_secs",
+        "grip_force_mean_au",
+        "grip_force_mean",
+    ]
+].head(10)
+```
+
+```{python}
+#| label: model-df-qa
+
+# Spot-check grip force: recomputed trial mean (100 Hz trace) vs v3 summary
+force_check = model_df[["grip_force_mean", "grip_force_mean_au"]].dropna()
+print(f"Trials with both force metrics: {len(force_check):,}")
+if len(force_check) > 0:
+    print(
+        "Pearson r (grip_force_mean vs grip_force_mean_au): "
+        f"{force_check['grip_force_mean'].corr(force_check['grip_force_mean_au']):.3f}"
+    )
+
+print("\nSpectral feature summaries by grip level:")
+model_df.groupby("grip_level")[["rms_error", "pow_05_3hz", "pow_8_12hz"]].describe().T
+```
+
+```{python}
+#| label: save-model-df
+
+model_path = REPO / "reports" / "analysis_trial_table.csv"
+model_df.to_csv(model_path, index=False)
+print(f"Wrote {model_path.relative_to(REPO)}")
+print(f"Columns: {len(model_df.columns)}")
 ```
 
 ## Next steps
 
-1. Run join QA (task labels, trial counts per run).
-2. Validate raw `raw_force` vs `grip_force_mean_au` on matched trials.
-3. Build trial-locked features and merge LC covariates from subj×task table.
+1. Build grip force models on `model_df` (predictors: `rms_error`, `pow_05_3hz`, `pow_8_12hz`; outcomes: `resp_is_correct`, RT columns, etc.).
+2. Merge LC covariates from the subj×task table.
+3. Add a CONSORT flow figure from `reports/grip_attrition_funnel.csv`.
 
 See `docs/DATA_LINKAGE.md` in the repo for join details.
