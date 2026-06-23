@@ -67,7 +67,11 @@ class GripforceFileStats:
     bids_subject: str
     bids_session: str
     n_rows: int
-    duration_s: float
+    duration_s: float  # col2 max-min; per-trial epoch span when col2 resets each trial
+    col3_span_s: float  # col3 max-min; approximate full run clock span
+    col2_max_s: float  # max(col2); longest single-trial elapsed window in file
+    col2_resets: int  # times col2 decreases (trial/block boundary marker)
+    estimated_epochs: int  # col2_resets + 1
     sample_rate_hz: float
     force_min: float
     force_max: float
@@ -143,6 +147,32 @@ def parse_bids_from_path(path: Path) -> tuple[str, str]:
     return subject, session
 
 
+def compute_timing_metrics(elapsed: list[float], abs_times: list[float]) -> dict[str, float | int]:
+    col2_span = max(elapsed) - min(elapsed)
+    col3_span = max(abs_times) - min(abs_times)
+    col2_max = max(elapsed)
+    resets = sum(1 for i in range(1, len(elapsed)) if elapsed[i] < elapsed[i - 1])
+    positive_diffs = [
+        elapsed[i] - elapsed[i - 1]
+        for i in range(1, len(elapsed))
+        if elapsed[i] >= elapsed[i - 1] and elapsed[i] - elapsed[i - 1] > 0
+    ]
+    if positive_diffs:
+        positive_diffs.sort()
+        median_dt = positive_diffs[len(positive_diffs) // 2]
+        sample_rate = 1.0 / median_dt
+    else:
+        sample_rate = 0.0
+    return {
+        "col2_span": col2_span,
+        "col3_span": col3_span,
+        "col2_max": col2_max,
+        "col2_resets": resets,
+        "estimated_epochs": resets + 1,
+        "sample_rate_hz": sample_rate,
+    }
+
+
 def summarize_gripforce_file(path: Path) -> GripforceFileStats:
     meta = parse_gripforce_filename(path)
     bids_subject, bids_session = parse_bids_from_path(path)
@@ -188,6 +218,10 @@ def summarize_gripforce_file(path: Path) -> GripforceFileStats:
             bids_session=bids_session,
             n_rows=0,
             duration_s=0.0,
+            col3_span_s=0.0,
+            col2_max_s=0.0,
+            col2_resets=0,
+            estimated_epochs=0,
             sample_rate_hz=0.0,
             force_min=float("nan"),
             force_max=float("nan"),
@@ -198,10 +232,7 @@ def summarize_gripforce_file(path: Path) -> GripforceFileStats:
             parse_warning=";".join(sorted(set(warnings)) or ["empty_file"]),
         )
 
-    duration = max(elapsed) - min(elapsed)
-    n_intervals = max(len(elapsed) - 1, 1)
-    median_dt = duration / n_intervals if duration > 0 else 0.0
-    sample_rate = 1.0 / median_dt if median_dt > 0 else 0.0
+    timing = compute_timing_metrics(elapsed, abs_times)
 
     return GripforceFileStats(
         filepath=str(path),
@@ -213,8 +244,12 @@ def summarize_gripforce_file(path: Path) -> GripforceFileStats:
         bids_subject=bids_subject,
         bids_session=bids_session,
         n_rows=len(forces),
-        duration_s=round(duration, 3),
-        sample_rate_hz=round(sample_rate, 2),
+        duration_s=round(float(timing["col2_span"]), 3),
+        col3_span_s=round(float(timing["col3_span"]), 3),
+        col2_max_s=round(float(timing["col2_max"]), 3),
+        col2_resets=int(timing["col2_resets"]),
+        estimated_epochs=int(timing["estimated_epochs"]),
+        sample_rate_hz=round(float(timing["sample_rate_hz"]), 2),
         force_min=round(min(forces), 4),
         force_max=round(max(forces), 4),
         force_mean=round(sum(forces) / len(forces), 4),
@@ -239,6 +274,17 @@ def write_csv(path: Path, rows: Iterable[dict[str, Any]], fieldnames: list[str])
             writer.writerow(row)
 
 
+def _timing_stats(values: list[float]) -> dict[str, float | None]:
+    if not values:
+        return {"min": None, "median": None, "max": None}
+    ordered = sorted(values)
+    return {
+        "min": ordered[0],
+        "median": ordered[len(ordered) // 2],
+        "max": ordered[-1],
+    }
+
+
 def summarize_gripforce(stats: list[GripforceFileStats]) -> dict[str, Any]:
     by_task = Counter(item.task for item in stats if item.task)
     by_subject = Counter(item.subject for item in stats if item.subject)
@@ -247,9 +293,25 @@ def summarize_gripforce(stats: list[GripforceFileStats]) -> dict[str, Any]:
         (item.subject, item.session, item.task) for item in stats if item.subject and item.task
     )
 
-    durations = [item.duration_s for item in stats if item.n_rows > 0]
-    forces_min = [item.force_min for item in stats if item.n_rows > 0]
-    forces_max = [item.force_max for item in stats if item.n_rows > 0]
+    valid = [item for item in stats if item.n_rows > 0]
+    durations = [item.duration_s for item in valid]
+    col3_spans = [item.col3_span_s for item in valid]
+    col2_maxes = [item.col2_max_s for item in valid]
+    n_rows_list = [item.n_rows for item in valid]
+    forces_min = [item.force_min for item in valid]
+    forces_max = [item.force_max for item in valid]
+
+    timing_by_task: dict[str, dict[str, dict[str, float | None] | float | None]] = {}
+    for task in sorted(by_task):
+        task_items = [item for item in valid if item.task == task]
+        timing_by_task[task] = {
+            "n_files": len(task_items),
+            "col2_span_s": _timing_stats([item.duration_s for item in task_items]),
+            "col3_span_s": _timing_stats([item.col3_span_s for item in task_items]),
+            "col2_max_s": _timing_stats([item.col2_max_s for item in task_items]),
+            "n_rows": _timing_stats([float(item.n_rows) for item in task_items]),
+            "estimated_epochs": _timing_stats([float(item.estimated_epochs) for item in task_items]),
+        }
 
     return {
         "n_files": len(stats),
@@ -261,11 +323,11 @@ def summarize_gripforce(stats: list[GripforceFileStats]) -> dict[str, Any]:
         "run_counts_by_subject_session_task": {
             f"{sub}|ses-{ses}|{task}": count for (sub, ses, task), count in sorted(run_counts.items())
         },
-        "duration_s": {
-            "min": min(durations) if durations else None,
-            "median": sorted(durations)[len(durations) // 2] if durations else None,
-            "max": max(durations) if durations else None,
-        },
+        "duration_s": _timing_stats(durations),
+        "col3_span_s": _timing_stats(col3_spans),
+        "col2_max_s": _timing_stats(col2_maxes),
+        "n_rows": _timing_stats([float(n) for n in n_rows_list]),
+        "timing_by_task": timing_by_task,
         "force": {
             "global_min": min(forces_min) if forces_min else None,
             "global_max": max(forces_max) if forces_max else None,
@@ -556,11 +618,49 @@ def render_markdown_report(
     lines.extend(
         [
             "",
-            "### Duration (seconds, per file)",
+            "### Timing interpretation",
+            "",
+            "- **`col2_span_s` (reported as Duration below):** `max(col2) − min(col2)`. When col2 resets each trial, this reflects the **longest single-trial grip window** in the file, not total run length.",
+            "- **`col3_span_s`:** `max(col3) − min(col3)`. Approximate **full run clock span** across all trials in the file.",
+            "- **`col2_resets` / `estimated_epochs`:** Number of trial/block boundaries (col2 decreases) + 1.",
+            "- Expected oddball grip window per trial ≈ **4.7 s** (through response). Compare `col2_max_s` to this.",
+            "",
+            "### col2 span per file (trial epoch proxy; seconds)",
             "",
             f"- Min: {gripforce_summary['duration_s']['min']}",
             f"- Median: {gripforce_summary['duration_s']['median']}",
             f"- Max: {gripforce_summary['duration_s']['max']}",
+            "",
+            "### col3 span per file (full run clock; seconds)",
+            "",
+            f"- Min: {gripforce_summary['col3_span_s']['min']}",
+            f"- Median: {gripforce_summary['col3_span_s']['median']}",
+            f"- Max: {gripforce_summary['col3_span_s']['max']}",
+            "",
+            "### Rows per file (samples at ~100 Hz)",
+            "",
+            f"- Min: {gripforce_summary['n_rows']['min']}",
+            f"- Median: {gripforce_summary['n_rows']['median']}",
+            f"- Max: {gripforce_summary['n_rows']['max']}",
+            "",
+            "### Timing by task",
+            "",
+        ]
+    )
+
+    for task, task_timing in sorted(gripforce_summary.get("timing_by_task", {}).items()):
+        lines.append(f"**{task}** ({int(task_timing['n_files'])} files):")
+        c2 = task_timing["col2_span_s"]
+        c3 = task_timing["col3_span_s"]
+        nr = task_timing["n_rows"]
+        ep = task_timing["estimated_epochs"]
+        lines.append(
+            f"- col2 span: {c2['min']}–{c2['max']} s (median {c2['median']}); "
+            f"col3 span median {c3['median']} s; rows median {nr['median']}; epochs median {ep['median']}"
+        )
+
+    lines.extend(
+        [
             "",
             "### Force (col4, units TBD)",
             "",
@@ -675,7 +775,9 @@ def run_inventory(config_path: Path | None = None, output_dir: Path | None = Non
     write_csv(
         file_inventory_csv,
         (asdict(item) for item in stats),
-        fieldnames=list(asdict(stats[0]).keys()) if stats else list(asdict(GripforceFileStats("", "", "", "", "", "", "", "", 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, "", "")).keys()),
+        fieldnames=list(asdict(stats[0]).keys()) if stats else list(asdict(GripforceFileStats(
+            "", "", "", "", "", "", "", "", 0, 0.0, 0.0, 0.0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, "", ""
+        )).keys()),
     )
 
     report_md = out_dir / "dataset_inventory.md"
