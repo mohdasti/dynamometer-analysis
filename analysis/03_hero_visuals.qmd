@@ -853,9 +853,9 @@ How does carrying 40% MVC change the accuracy × difficulty curve? The load effe
 #| label: visual-psychometric-data
 
 psycho_dat <- model_tbl %>%
-  filter(!is.na(resp_is_correct), subject_id != "BAP196") %>%
+  filter(!is.na(resp_is_diff), subject_id != "BAP196") %>%
   mutate(
-    resp = as.integer(tolower(as.character(resp_is_correct)) == "true"),
+    p_diff = as.integer(tolower(as.character(resp_is_diff)) == "true"),
     grip_label = factor(
       ifelse(is_high(is_high_grip), "High grip (40% MVC)", "Low grip (5% MVC)"),
       levels = c("Low grip (5% MVC)", "High grip (40% MVC)")
@@ -865,30 +865,26 @@ psycho_dat <- model_tbl %>%
   ) %>%
   group_by(grip_label, task_label, stim_level) %>%
   summarise(
-    acc  = mean(resp, na.rm = TRUE),
-    se   = sqrt(acc * (1 - acc) / n()),
-    n    = n(),
+    pd  = mean(p_diff, na.rm = TRUE),
+    se  = sqrt(pd * (1 - pd) / n()),
+    n   = n(),
     .groups = "drop"
   )
-
-# Difficulty labels matching typical psychophysics convention
-stim_labels <- c("0" = "Easiest\n(Δ0)", "1" = "Hard\n(Δ1)", "2" = "Medium\n(Δ2)",
-                 "3" = "Easy\n(Δ3)", "4" = "Easiest\n(Δ4)")
 ```
 
 ```{r}
 #| label: visual-psychometric
 #| fig-height: 5
-#| fig-cap: "Perceptual accuracy by stimulus difficulty and grip condition."
+#| fig-cap: "Psychometric function: P('Different') rises monotonically with stimulus level; physical load compresses the curve."
 
 grip_colors <- c("Low grip (5% MVC)" = "#0072B2", "High grip (40% MVC)" = "#D55E00")
 
 p_psycho <- ggplot(psycho_dat, aes(
-    x = stim_level, y = acc,
+    x = stim_level, y = pd,
     color = grip_label, group = grip_label
   )) +
   geom_ribbon(
-    aes(ymin = pmax(acc - 1.96 * se, 0), ymax = pmin(acc + 1.96 * se, 1), fill = grip_label),
+    aes(ymin = pmax(pd - 1.96 * se, 0), ymax = pmin(pd + 1.96 * se, 1), fill = grip_label),
     alpha = 0.12, color = NA
   ) +
   geom_line(linewidth = 1.0) +
@@ -898,16 +894,20 @@ p_psycho <- ggplot(psycho_dat, aes(
   scale_fill_manual(values = grip_colors, guide = "none") +
   scale_y_continuous(
     labels = label_percent(accuracy = 1),
-    limits = c(0.05, 1.02),
-    expand = c(0, 0)
+    limits = c(0, 1.02),
+    expand = c(0, 0),
+    breaks = seq(0, 1, 0.25)
   ) +
-  scale_x_continuous(breaks = 0:4, labels = c("Δ0", "Δ1", "Δ2", "Δ3", "Δ4")) +
+  scale_x_continuous(
+    breaks = 0:4,
+    labels = c("Δ0\n(catch)", "Δ1\n(weakest)", "Δ2", "Δ3", "Δ4\n(strongest)")
+  ) +
   labs(
-    title = "Physical Load Suppresses Accuracy at Intermediate Difficulty",
-    subtitle = "High grip (40% MVC) consistently underperforms low grip; gap widest at Δ2 (medium difficulty)",
-    x = "Stimulus difficulty level",
-    y = "Accuracy",
-    caption = "Mean ± 95% CI across subjects. Δ0 = easiest; Δ1 = hardest."
+    title = "Physical Load Compresses the Psychometric Function",
+    subtitle = "High grip (40% MVC) reduces detection sensitivity; gap largest at intermediate signal levels (Δ2)",
+    x = "Stimulus level",
+    y = "P('Different')",
+    caption = "Mean ± 95% CI. Δ0 = catch trial (no change); Δ4 = strongest signal. resp_is_diff column."
   ) +
   theme_hero() +
   theme(legend.position = "top")
