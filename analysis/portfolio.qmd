@@ -288,7 +288,7 @@ model_tbl %>%
 ## 7. Limitations & next steps
 
 1. **Whole-epoch features** — spectral summaries integrate the full ~2.94 s trial; probe-locked post-stimulus windows would tighten the cognitive-shock claim.
-2. **File attrition (post re-download)** — after recovering missing grip CSVs, **72.5%** of retainable behavioral trials reach the analysis set (12,783 / 17,621). Residual loss: **5.5%** no grip files (7 subject×tasks), **21.6%** partial grip coverage, **3.4%** feature extraction.
+2. **File attrition (post re-download)** — **78.1%** of retainable behavioral trials reach the analysis set (13,759 / 17,621). Residual loss: **0.7%** no grip files (BAP172 aud only), **20.9%** partial grip coverage, **3.8%** feature extraction.
 3. **Grip stratification required** — pooled tremor effects flip sign across grip conditions; primary inference is high-grip only.
 4. **Auditory probe timing** — `probe_onset_s = 0` for aud; visual trials have sub-second probe offsets.
 

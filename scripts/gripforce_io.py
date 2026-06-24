@@ -102,13 +102,19 @@ def find_gripforce_files(
 
 
 def _load_raw_gripforce_csv(path: Path) -> pd.DataFrame:
+    """
+    Load four-column gripforce CSV without header.
+
+    Column 0 (``marker``) is read as float64: oddball files store continuous
+    force there (e.g. 32.5), while some legacy exports use integer block codes.
+    """
     df = pd.read_csv(
         path,
         header=None,
         names=COLUMN_NAMES,
         usecols=range(4),
         dtype={
-            "marker": np.int64,
+            "marker": np.float64,
             "elapsed_time": np.float64,
             "abs_time": np.float64,
             "raw_force": np.float64,

@@ -65,6 +65,17 @@ def test_load_gripforce_file_drops_short_epochs(tmp_path):
     assert df["task"].iloc[0] == "Aoddball"
 
 
+def test_load_gripforce_file_accepts_float_marker_column(tmp_path):
+    """Oddball CSVs store continuous force in col1 (marker), not always int."""
+    path = tmp_path / "subjectBAP136_Aoddball_session2_run2_1_5_14_31_gripforce.csv"
+    rows = [f"32.5,{0.01 * i:.6f},{15000 + 0.01 * i:.6f},1.0" for i in range(1, 121)]
+    path.write_text("\n".join(rows) + "\n")
+
+    df = load_gripforce_file(path, min_rows_per_trial=100)
+    assert len(df) == 120
+    assert (df[FORCE_COLUMN] == 32.5).all()
+
+
 def test_load_gripforce_long_excludes_mvcnprac():
     df = load_gripforce_long(FIXTURE_ROOT, min_rows_per_trial=50, sessions=None)
     assert "MVCnPRAC" not in set(df["task"])
