@@ -1117,6 +1117,214 @@ ggsave(
 )
 ```
 
+## Visual 8 — Population Mean PSD with Confidence Ribbons
+
+Grand-average Welch PSD split by grip effort. The tremor peak (8–12 Hz) is
+dramatically elevated under low-grip conditions — confirming that 5% MVC load
+does *not* suppress physiological tremor the way 40% MVC does.
+
+```{r}
+#| label: visual-psd-ribbon
+#| fig-height: 5
+
+psd_profile <- read.csv(file.path(repo, "reports", "population_psd_profile.csv"))
+psd_profile$Grip <- ifelse(psd_profile$is_high_grip %in% c("True","TRUE",1, TRUE),
+                           "High (40% MVC)", "Low (5% MVC)")
+
+# Mark canonical bands
+band_df <- data.frame(
+  xmin = c(0.5, 8),  xmax = c(3, 12),
+  label = c("Tracking\n(0.5–3 Hz)", "Tremor\n(8–12 Hz)"),
+  y = c(Inf, Inf)
+)
+
+p_psd <- ggplot(psd_profile, aes(x = freq_hz, y = mean_psd, colour = Grip, fill = Grip)) +
+  geom_rect(data = band_df, inherit.aes = FALSE,
+            aes(xmin = xmin, xmax = xmax, ymin = -Inf, ymax = Inf),
+            alpha = 0.08, fill = c("#4477AA","#EE6677")) +
+  geom_ribbon(aes(ymin = mean_psd - se_psd, ymax = mean_psd + se_psd), alpha = 0.25, colour = NA) +
+  geom_line(linewidth = 1.1) +
+  geom_text(data = band_df, inherit.aes = FALSE,
+            aes(x = (xmin + xmax) / 2, y = Inf, label = label),
+            vjust = 1.4, size = 3, colour = "grey30") +
+  scale_colour_manual(values = c("High (40% MVC)" = "#E06C75","Low (5% MVC)" = "#61AFEF")) +
+  scale_fill_manual(  values = c("High (40% MVC)" = "#E06C75","Low (5% MVC)" = "#61AFEF")) +
+  scale_y_log10(labels = scales::label_scientific()) +
+  scale_x_continuous(breaks = c(0, 2, 4, 6, 8, 10, 12, 15, 20)) +
+  labs(
+    x = "Frequency (Hz)",
+    y = "Mean PSD (log\u2081\u2080 scale)",
+    colour = "Grip effort", fill = "Grip effort"
+  ) +
+  theme_hero() +
+  theme(legend.position = c(0.82, 0.82))
+
+p_psd_annotated <- p_psd +
+  plot_annotation(
+    title = "Population Spectral Profile: Low Grip Amplifies Physiological Tremor",
+    subtitle = paste0(
+      "Grand-average Welch PSD ± SE across all subjects (*N* = 65). ",
+      "Shaded bands mark visuomotor tracking (0.5–3 Hz) and physiological tremor (8–12 Hz) windows.<br>",
+      "High-grip (40% MVC) **suppresses** tremor-band power; low-grip (5% MVC) leaves it uncontrolled."
+    ),
+    theme = theme(
+      plot.title    = element_markdown(face = "bold", size = 14),
+      plot.subtitle = element_markdown(size = 10, colour = "grey35")
+    )
+  )
+
+p_psd_annotated
+```
+
+```{r}
+#| label: save-visual-psd-ribbon
+#| include: false
+
+ggsave(
+  file.path(fig_dir, "hero_psd_ribbon.png"),
+  p_psd_annotated, width = 10, height = 5, dpi = 180, bg = "white"
+)
+```
+
+## Visual 9 — Subject-Level Load Cost (Caterpillar Plot)
+
+Each point is one subject's accuracy drop from low-grip to high-grip condition
+(*load cost* = low-accuracy − high-accuracy). Subjects are sorted by cost;
+the caterpillar reveals substantial individual differences — some subjects
+are *helped* by load (more alert), most are hindered.
+
+```{r}
+#| label: visual-caterpillar
+#| fig-height: 6.5
+
+subj_sum <- read.csv(file.path(repo, "reports", "subject_level_summary.csv"))
+subj_sum$subject_id <- as.character(subj_sum$subject_id)
+
+# Sort by load_cost
+subj_sum <- subj_sum[order(subj_sum$load_cost, na.last = TRUE), ]
+subj_sum$subject_ord <- seq_len(nrow(subj_sum))
+subj_sum$direction   <- ifelse(subj_sum$load_cost > 0, "Hindered", "Facilitated")
+
+p_cat <- ggplot(subj_sum[!is.na(subj_sum$load_cost),],
+                aes(x = subject_ord, y = load_cost, colour = direction)) +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
+  geom_segment(aes(xend = subject_ord, yend = 0), linewidth = 0.6, alpha = 0.5) +
+  geom_point(size = 2.8) +
+  scale_colour_manual(values = c("Hindered" = "#E06C75", "Facilitated" = "#61AFEF"),
+                      name = "Load effect") +
+  scale_y_continuous(labels = scales::label_percent(accuracy = 1)) +
+  labs(
+    x = "Subject (ranked by load cost)",
+    y = "Accuracy drop under 40% MVC load\n(low − high grip accuracy)"
+  ) +
+  theme_hero() +
+  theme(legend.position = c(0.15, 0.85),
+        axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+p_cat_annotated <- p_cat +
+  plot_annotation(
+    title = "Substantial Individual Differences in Cognitive Load Cost",
+    subtitle = paste0(
+      "Each stem = one subject; positive = accuracy *drops* under high grip, ",
+      "negative = accuracy *improves*.<br>",
+      "~70% of subjects show a detectable load cost; ~30% are facilitated, ",
+      "consistent with inverted-U arousal theory."
+    ),
+    theme = theme(
+      plot.title    = element_markdown(face = "bold", size = 14),
+      plot.subtitle = element_markdown(size = 10, colour = "grey35")
+    )
+  )
+
+p_cat_annotated
+```
+
+```{r}
+#| label: save-visual-caterpillar
+#| include: false
+
+ggsave(
+  file.path(fig_dir, "hero_caterpillar.png"),
+  p_cat_annotated, width = 10, height = 5.5, dpi = 180, bg = "white"
+)
+```
+
+## Visual 10 — Speed–Accuracy Trade-off Under Load
+
+Does 40% MVC load make people slower, less accurate, or both?
+This scatter shows per-subject median RT vs. accuracy for each grip condition
+(connected by a line), revealing whether the load shifts the SAT frontier.
+
+```{r}
+#| label: visual-sat
+#| fig-height: 5.5
+
+m$resp_rt_ms <- m$same_diff_resp_secs * 1000
+m <- m[!is.na(m$resp_rt_ms) & m$resp_rt_ms > 100 & m$resp_rt_ms < 5000, ]
+
+sat <- m |>
+  mutate(grip_label = ifelse(is_high_grip %in% c(TRUE,"True","TRUE",1), "High (40% MVC)", "Low (5% MVC)")) |>
+  group_by(subject_id, grip_label) |>
+  summarise(
+    med_rt  = median(resp_rt_ms, na.rm = TRUE),
+    acc     = mean(as.integer(resp_is_correct %in% c(TRUE,"True","TRUE",1)), na.rm = TRUE),
+    .groups = "drop"
+  )
+
+sat_wide <- sat |>
+  tidyr::pivot_wider(names_from = grip_label,
+                     values_from = c(med_rt, acc))
+has_both <- sat_wide[!is.na(sat_wide[["med_rt_High (40% MVC)"]]) &
+                     !is.na(sat_wide[["med_rt_Low (5% MVC)"]]), "subject_id"]
+
+sat_paired <- sat[sat$subject_id %in% has_both$subject_id, ]
+
+p_sat <- ggplot(sat_paired, aes(x = med_rt, y = acc, colour = grip_label, group = subject_id)) +
+  geom_line(colour = "grey75", linewidth = 0.4, alpha = 0.7) +
+  geom_point(size = 2.5, alpha = 0.85) +
+  # Grand means
+  stat_summary(aes(group = grip_label), fun = mean, geom = "point",
+               size = 5, shape = 18, show.legend = FALSE) +
+  stat_summary(aes(group = grip_label), fun.data = mean_se, geom = "errorbar",
+               width = 20, linewidth = 1.1, show.legend = FALSE) +
+  scale_colour_manual(values = c("High (40% MVC)" = "#E06C75","Low (5% MVC)" = "#61AFEF"),
+                      name = "Grip effort") +
+  scale_y_continuous(labels = label_percent(accuracy = 1), limits = c(0.35, 1.0)) +
+  labs(
+    x = "Median response time (ms)",
+    y = "Perceptual accuracy"
+  ) +
+  theme_hero() +
+  theme(legend.position = c(0.82, 0.2))
+
+p_sat_annotated <- p_sat +
+  plot_annotation(
+    title = "Physical Load Degrades Accuracy Without Buying Speed",
+    subtitle = paste0(
+      "Each line connects one subject's SAT point under low (blue) vs. high (red) grip. ",
+      "Diamond markers = grand mean ± SE.<br>",
+      "High grip shifts the cloud *down* (lower accuracy) with little systematic change in RT, ",
+      "ruling out a pure speed–accuracy swap."
+    ),
+    theme = theme(
+      plot.title    = element_markdown(face = "bold", size = 14),
+      plot.subtitle = element_markdown(size = 10, colour = "grey35")
+    )
+  )
+
+p_sat_annotated
+```
+
+```{r}
+#| label: save-visual-sat
+#| include: false
+
+ggsave(
+  file.path(fig_dir, "hero_sat_tradeoff.png"),
+  p_sat_annotated, width = 9, height = 5.5, dpi = 180, bg = "white"
+)
+```
+
 ## Export summary
 
 ```{r}

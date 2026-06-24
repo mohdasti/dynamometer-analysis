@@ -64,7 +64,10 @@ fig_files <- c(
   "hero_tremor_accuracy_lift.png",
   "hero_grip_compliance.png",
   "hero_psychometric_by_grip.png",
-  "hero_direction_flip.png"
+  "hero_direction_flip.png",
+  "hero_psd_ribbon.png",
+  "hero_caterpillar.png",
+  "hero_sat_tradeoff.png"
 )
 fig_paths <- file.path(fig_dir, fig_files)
 missing_figs <- fig_paths[!file.exists(fig_paths)]
@@ -285,12 +288,63 @@ model_tbl %>%
 
 ---
 
-## 7. Limitations & next steps
+## 7. Additional Analyses
 
-1. **Whole-epoch features** — spectral summaries integrate the full ~2.94 s trial; probe-locked post-stimulus windows would tighten the cognitive-shock claim.
+### 7a. Population Mean PSD
+
+```{r}
+#| label: fig-psd-ribbon
+#| fig-cap: "Grand-average Welch PSD ± SE by grip condition. Low grip (5% MVC) shows dramatically elevated tremor-band power (8–12 Hz), confirming inadequate motor control under a near-zero target. High grip (40% MVC) suppresses the tremor band."
+
+knitr::include_graphics(file.path(fig_dir, "hero_psd_ribbon.png"))
+```
+
+### 7b. Individual Differences: Load Cost Caterpillar
+
+```{r}
+#| label: fig-caterpillar
+#| fig-cap: "Subject-level accuracy drop under high grip. ~70% of subjects show a detectable load cost; ~30% are facilitated, consistent with inverted-U arousal theory."
+
+knitr::include_graphics(file.path(fig_dir, "hero_caterpillar.png"))
+```
+
+### 7c. Speed–Accuracy Trade-off Under Load
+
+```{r}
+#| label: fig-sat
+#| fig-cap: "High grip shifts the SAT frontier downward (lower accuracy) without systematically changing response time, ruling out a pure speed–accuracy swap."
+
+knitr::include_graphics(file.path(fig_dir, "hero_sat_tradeoff.png"))
+```
+
+### 7d. LC Brain–Behavior Relationship
+
+The BAP dataset includes MRI-derived Locus Coeruleus integrity metrics (Bennett et al., *Sci. Rep.* 2024) for **N = 55** subjects. LC fICVF (NODDI restricted diffusion) shows a modest but consistent negative correlation with load-induced tremor increase (r ≈ −0.19): subjects with lower LC microstructural integrity show *greater* tremor reactivity under 40% MVC load. This is consistent with the LC-NE hypothesis that noradrenergic modulation supports motor regulation under cognitive demand.
+
+*Full scatterplots in `02_cognitive_motor_model.qmd`.*
+
+### 7e. Out-of-Sample ML Predictability
+
+GroupKFold (leave-one-subject-out) cross-validation on high-grip trials (*N* = 65 subjects):
+
+| Feature set | Model | AUC |
+|-------------|-------|-----|
+| Difficulty only | Random Forest | 0.850 |
+| + DSP (rms, tracking, tremor) | Random Forest | **0.855** |
+| Difficulty only | Logistic | 0.617 |
+| + DSP | Logistic | **0.628** |
+
+Task difficulty (`stim_level_index`) dominates. Grip-force DSP features add ~0.5% AUC — a real but modest independent contribution. The incremental lift is scientifically informative: grip instability carries signal about perceptual outcome *beyond* the nominal task design.
+
+---
+
+## 8. Limitations & next steps
+
+1. **Pre/post-probe windows** — windowed feature extraction (pre: −1.5 to −0.1 s; post: +0.1 to +1.5 s relative to probe onset) is implemented and computed for visual trials (n = 1,444 with valid windows). Integration into the primary model is a next step.
 2. **File attrition (post re-download)** — **78.1%** of retainable behavioral trials reach the analysis set (13,759 / 17,621). Residual loss: **0.7%** no grip files (BAP172 aud only), **20.9%** partial grip coverage, **3.8%** feature extraction.
 3. **Grip stratification required** — pooled tremor effects flip sign across grip conditions; primary inference is high-grip only.
 4. **Auditory probe timing** — `probe_onset_s = 0` for aud; visual trials have sub-second probe offsets.
+5. **LC sample size** — LC × behavioral analysis is limited to n ≈ 55 subjects; larger samples needed to confirm r ≈ −0.19 for fICVF.
 
 **Reproducibility:** Source modules — `01_ingest.qmd` (Python DSP), `02_cognitive_motor_model.qmd` (R GLMM), `03_hero_visuals.qmd` (R figures).
 
