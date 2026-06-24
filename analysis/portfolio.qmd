@@ -406,8 +406,14 @@ sat_df <- m_sat |>
     subject_id, grip_label, med_rt, acc * 100, n
   ))
 
-sat_wide <- tidyr::pivot_wider(sat_df, names_from = grip_label,
-                                values_from = c(med_rt, acc, hover_text))
+# Pivot only plot columns — leaving `n` out of values_from splits each subject
+# into two rows (high-n vs low-n), collapsing 65 paired subjects down to ~11.
+sat_wide <- sat_df |>
+  dplyr::select(subject_id, grip_label, med_rt, acc, hover_text) |>
+  tidyr::pivot_wider(
+    names_from = grip_label,
+    values_from = c(med_rt, acc, hover_text)
+  )
 has_both_sat <- sat_wide[
   !is.na(sat_wide[["med_rt_High (40% MVC)"]]) &
   !is.na(sat_wide[["med_rt_Low (5% MVC)"]]),
