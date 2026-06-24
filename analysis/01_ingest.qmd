@@ -81,6 +81,8 @@ print(f"Excluded tasks: {DEFAULT_EXCLUDE_TASKS}")
 
 Each CSV is one fatigue-break **run** (administrative split only). Trials are split when `elapsed_time` (col2) resets. Trials with fewer than 100 samples (~1 s) are dropped as edge artifacts. All trial counts below **merge runs** within each session.
 
+**Scanner folders:** Oddball grip CSVs are read from `InsideScanner` by default. `OutsideScanner` files are included for **BAP166** and **BAP171** only (auditory oddball relocated off-scanner).
+
 ```{python}
 #| label: ingest-gripforce
 #| message: false

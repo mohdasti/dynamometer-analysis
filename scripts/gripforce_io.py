@@ -28,6 +28,8 @@ EXPECTED_RUNS_PER_TASK = 5
 EXPECTED_GRIP_PER_LEVEL = 75
 # Subject-tasks below this trial count after v3 cleaning are treated as mid-task aborts.
 ABORT_TRIAL_THRESHOLD = 100
+# Oddball grip files stored under OutsideScanner for these subjects (data relocation).
+OUTSIDE_SCANNER_SUBJECTS = frozenset({"BAP166", "BAP171"})
 
 
 def parse_gripforce_filename(path: Path) -> dict[str, str | int]:
@@ -45,29 +47,57 @@ def parse_gripforce_filename(path: Path) -> dict[str, str | int]:
     }
 
 
+def _gripforce_scanner_eligible(path: Path) -> bool:
+    """InsideScanner for all subjects; OutsideScanner only for allowlisted subjects."""
+    if "InsideScanner" in path.parts:
+        return True
+    if "OutsideScanner" not in path.parts:
+        return False
+    try:
+        subject_id = parse_gripforce_filename(path)["subject_id"]
+    except ValueError:
+        return False
+    return subject_id in OUTSIDE_SCANNER_SUBJECTS
+
+
 def find_gripforce_files(
     gripforce_root: str | Path,
     *,
     sessions: tuple[int, ...] | None = (2, 3),
     exclude_tasks: tuple[str, ...] | None = DEFAULT_EXCLUDE_TASKS,
 ) -> list[Path]:
-    """Return sorted gripforce CSV paths under InsideScanner folders."""
+    """
+    Return sorted gripforce CSV paths under InsideScanner folders.
+
+    Also includes OutsideScanner oddball files for subjects in
+    ``OUTSIDE_SCANNER_SUBJECTS`` (currently BAP166, BAP171).
+    """
     root = Path(gripforce_root)
     if not root.is_dir():
         raise FileNotFoundError(f"gripforce_root not found: {root}")
 
-    files = sorted(p for p in root.rglob(GRIPFORCE_GLOB) if "InsideScanner" in p.parts)
+    files = sorted(
+        p for p in root.rglob(GRIPFORCE_GLOB) if _gripforce_scanner_eligible(p)
+    )
     if sessions is not None:
         session_tokens = {f"ses-{s}" for s in sessions}
         files = [p for p in files if any(token in p.parts for token in session_tokens)]
 
     if exclude_tasks:
         excluded = {task.upper() for task in exclude_tasks}
-        files = [
-            p
-            for p in files
-            if parse_gripforce_filename(p)["task"].upper() not in excluded
-        ]
+        kept: list[Path] = []
+        for path in files:
+            try:
+                task = parse_gripforce_filename(path)["task"].upper()
+            except ValueError:
+                warnings.warn(
+                    f"Skipping unparseable gripforce filename: {path.name}",
+                    stacklevel=2,
+                )
+                continue
+            if task not in excluded:
+                kept.append(path)
+        files = kept
     return files
 
 
