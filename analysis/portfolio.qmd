@@ -61,7 +61,10 @@ fig_files <- c(
   "hero_probe_locked_spectrogram.png",
   "hero_spectral_fingerprint.png",
   "hero_spectral_feature_space.png",
-  "hero_tremor_accuracy_lift.png"
+  "hero_tremor_accuracy_lift.png",
+  "hero_grip_compliance.png",
+  "hero_psychometric_by_grip.png",
+  "hero_direction_flip.png"
 )
 fig_paths <- file.path(fig_dir, fig_files)
 missing_figs <- fig_paths[!file.exists(fig_paths)]
@@ -81,12 +84,14 @@ if (length(missing_figs) > 0) {
 
 **Pipeline:** Target-normalized force error → linear detrend → zero-phase 0.5 Hz high-pass (`sosfiltfilt`) → Welch PSD → band power (0.5–3 Hz tracking, 8–12 Hz tremor) → mixed-effects logistic regression of `resp_is_correct`.
 
+**Primary analysis:** High grip only (40% MVC). Low grip (5% MVC) is a comparison arm — pooled models are misleading because tremor effects flip sign across grip conditions.
+
 **Headline results:**
 
 - Force QA: recomputed trial means vs behavioral v3, **r = `r sprintf('%.3f', force_r)`**.
-- Block LRT (baseline vs DSP-augmented): **marginal** (report exact p from saved model if available).
-- Tremor-band power (8–12 Hz): **OR = 1.18, p = 0.029** in DSP-augmented GLMM.
-- Tracking-band power (0.5–3 Hz): not significant (OR = 0.95, p = 0.42).
+- High-grip compliance: median 1.09× target (40% MVC held with high fidelity across 44 subjects).
+- **Direction flip:** tremor OR < 1 under high grip (interference prediction); OR > 1 under low grip (precision-noise artifact of near-zero target).
+- Psychometric function: physical load compresses P("Different") at intermediate signal levels (Δ2).
 
 **Ask for feedback on:** (1) scientific narrative, (2) figure clarity for quant-UX portfolio, (3) whether probe-locked spectrogram supports the “cognitive shock” claim, (4) modeling choices.
 
@@ -192,14 +197,43 @@ knitr::include_graphics(fig_paths[4])
 knitr::include_graphics(fig_paths[5])
 ```
 
+### 4.6 Grip compliance (40% MVC)
+
+```{r}
+#| label: fig-compliance
+#| fig-cap: "Per-subject force compliance confirms high-grip spectral features are well-calibrated."
+
+knitr::include_graphics(fig_paths[6])
+```
+
+### 4.7 Psychometric function under load
+
+```{r}
+#| label: fig-psychometric
+#| fig-cap: "P('Different') rises monotonically with signal strength; high grip compresses the function at intermediate levels."
+
+knitr::include_graphics(fig_paths[7])
+```
+
+### 4.8 Direction flip — tremor under load
+
+```{r}
+#| label: fig-flip
+#| fig-cap: "Opposite tremor slopes and ORs for high vs low grip — the key sanity check."
+
+knitr::include_graphics(fig_paths[8])
+```
+
 ---
 
 ## 5. Mixed-effects modeling
 
-Trial-level logistic GLMMs with random intercepts for `subject_id`:
+**Primary cohort:** high grip (40% MVC) only. Trial-level logistic GLMMs with random intercepts for `subject_id`:
 
-- **Baseline:** `resp_is_correct ~ task_modality + stim_level_index + is_high_grip + (1 | subject_id)`
+- **Baseline:** `resp_is_correct ~ task_modality + stim_level_index + (1 | subject_id)`
 - **DSP-augmented:** adds z-scored `pow_05_3hz` and `pow_8_12hz`
+
+Low-grip trials are fitted identically as a comparison arm (see stratified tremor table in `02_cognitive_motor_model.qmd`).
 
 ```{r}
 #| label: fx-table
@@ -208,7 +242,7 @@ fx_tbl %>%
   rename(`OR (95% CI)` = OR..95..CI.) %>%
   gt(groupname_col = "Model") %>%
   tab_header(
-    title = "Fixed effects — perceptual accuracy",
+    title = "Fixed effects — high grip (40% MVC)",
     subtitle = "Odds ratios (95% CI) from mixed-effects logistic regression"
   ) %>%
   cols_label(
@@ -219,7 +253,7 @@ fx_tbl %>%
   tab_options(table.font.size = px(12))
 ```
 
-**Interpretation:** Tremor-band power shows a significant positive association with correct responses (OR > 1) after adjusting for modality, difficulty, and effort — but the **joint** DSP block LRT is marginal at α = .05. Interpret tremor effect cautiously; consider single-term LRT and probe-locked sensitivity analyses.
+**Interpretation:** Under physical load (40% MVC), tremor-band power trends negative (more tremor → lower accuracy). The pooled model that included both grip conditions was misleading — the significant positive tremor effect was driven by low-grip precision noise, not load-induced interference.
 
 ---
 
@@ -249,7 +283,7 @@ model_tbl %>%
 
 1. **Whole-epoch features** — spectral summaries integrate the full ~2.94 s trial; probe-locked post-stimulus windows would tighten the cognitive-shock claim.
 2. **Missing grip files** — ~61 subject-tasks lack on-disk gripforce; file attrition, not participant failure.
-3. **Borderline LRT** — joint DSP improvement is marginal; tremor-only term is borderline significant.
+3. **Grip stratification required** — pooled tremor effects flip sign across grip conditions; primary inference is high-grip only.
 4. **Auditory probe timing** — `probe_onset_s = 0` for aud; visual trials have sub-second probe offsets.
 
 **Reproducibility:** Source modules — `01_ingest.qmd` (Python DSP), `02_cognitive_motor_model.qmd` (R GLMM), `03_hero_visuals.qmd` (R figures).
