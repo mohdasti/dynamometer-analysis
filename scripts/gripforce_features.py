@@ -133,6 +133,31 @@ def _attach_trial_targets(
     )
 
 
+def compute_trial_welch_psd(
+    force: np.ndarray,
+    target_force: float,
+    *,
+    fs: float = GRIP_SAMPLE_RATE_HZ,
+    welch_nperseg: int | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Return (freq_hz, psd) for one trial using the same pipeline as feature extraction.
+
+    Pipeline: target-normalized error → linear detrend → sosfiltfilt high-pass → Welch.
+    """
+    if not np.isfinite(target_force) or target_force <= 0 or force.size == 0:
+        return np.array([]), np.array([])
+
+    normalized_error = (force - target_force) / target_force
+    filtered = _prepare_spectral_signal(normalized_error, fs=fs)
+    nperseg = welch_nperseg or min(len(filtered), 256)
+    nperseg = min(nperseg, len(filtered))
+    if nperseg < 2:
+        return np.array([]), np.array([])
+
+    return signal.welch(filtered, fs=fs, nperseg=nperseg, detrend=False)
+
+
 def extract_trial_spectral_features(
     grip: pd.DataFrame,
     beh: pd.DataFrame,

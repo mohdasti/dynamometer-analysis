@@ -21,7 +21,8 @@ analysis/*_files/
 # R model objects (large binary; regenerate from qmd)
 reports/*.rds
 
-# Generated reports (CSV outputs from pipeline runs)
+# Generated portfolio export (self-contained HTML for LLM / reviewer upload)
+portfolio_case_study.html
 reports/analysis_trial_table.csv
 reports/cognitive_motor_glmer_fixed_effects.csv
 reports/grip_attrition_funnel.csv

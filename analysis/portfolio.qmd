@@ -1,0 +1,268 @@
+---
+title: "Cognitive–Motor Interference Under Load"
+subtitle: "Complete Portfolio Case Study — BAP Gripforce × Perceptual Decision-Making"
+author: "Mohd Dastgheib"
+date: last-modified
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    number-sections: true
+    theme: cosmo
+    code-fold: true
+    code-summary: "View code"
+    embed-resources: true
+    fig-width: 9
+    fig-dpi: 144
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup
+
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(gt)
+})
+
+repo <- normalizePath("..", winslash = "/", mustWork = TRUE)
+if (!file.exists(file.path(repo, "reports", "analysis_trial_table.csv"))) {
+  repo <- normalizePath(".", winslash = "/", mustWork = TRUE)
+}
+
+fig_dir <- file.path(repo, "reports", "figures")
+model_path <- file.path(repo, "reports", "analysis_trial_table.csv")
+fx_path <- file.path(repo, "reports", "cognitive_motor_glmer_fixed_effects.csv")
+attrition_path <- file.path(repo, "reports", "grip_attrition_funnel.csv")
+
+stopifnot(
+  file.exists(model_path),
+  file.exists(fx_path)
+)
+
+model_tbl <- read.csv(model_path, stringsAsFactors = FALSE)
+fx_tbl <- read.csv(fx_path, stringsAsFactors = FALSE)
+attrition <- read.csv(attrition_path, stringsAsFactors = FALSE)
+
+n_trials <- nrow(model_tbl)
+n_subjects <- length(unique(model_tbl$subject_id))
+force_r <- cor(
+  model_tbl$grip_force_mean,
+  model_tbl$grip_force_mean_au,
+  use = "complete.obs"
+)
+
+fig_files <- c(
+  "hero_single_trial_anatomy.png",
+  "hero_probe_locked_spectrogram.png",
+  "hero_spectral_fingerprint.png",
+  "hero_spectral_feature_space.png",
+  "hero_tremor_accuracy_lift.png"
+)
+fig_paths <- file.path(fig_dir, fig_files)
+missing_figs <- fig_paths[!file.exists(fig_paths)]
+if (length(missing_figs) > 0) {
+  stop(
+    "Missing figures. Run `quarto render analysis/03_hero_visuals.qmd` first:\n",
+    paste(missing_figs, collapse = "\n")
+  )
+}
+```
+
+## LLM / reviewer brief {#llm-brief}
+
+**One-sentence pitch:** Continuous 100 Hz grip-force streams carry trial-level spectral signatures of cognitive–motor interference that predict perceptual oddball accuracy beyond nominal effort labels.
+
+**Dataset:** Older-adult BAP cohort · auditory + visual oddball · low/high grip effort · `r n_trials` analysis trials · `r n_subjects` subjects.
+
+**Pipeline:** Target-normalized force error → linear detrend → zero-phase 0.5 Hz high-pass (`sosfiltfilt`) → Welch PSD → band power (0.5–3 Hz tracking, 8–12 Hz tremor) → mixed-effects logistic regression of `resp_is_correct`.
+
+**Headline results:**
+
+- Force QA: recomputed trial means vs behavioral v3, **r = `r sprintf('%.3f', force_r)`**.
+- Block LRT (baseline vs DSP-augmented): **marginal** (report exact p from saved model if available).
+- Tremor-band power (8–12 Hz): **OR = 1.18, p = 0.029** in DSP-augmented GLMM.
+- Tracking-band power (0.5–3 Hz): not significant (OR = 0.95, p = 0.42).
+
+**Ask for feedback on:** (1) scientific narrative, (2) figure clarity for quant-UX portfolio, (3) whether probe-locked spectrogram supports the “cognitive shock” claim, (4) modeling choices.
+
+---
+
+## 1. Scientific framing
+
+### Research question
+
+Does the moment-to-moment quality of concurrent grip-force control during perceptual decision-making predict accuracy beyond task modality, stimulus difficulty, and grip effort condition?
+
+### Hypothesis
+
+The motor system acts as a high-fidelity mirror of cognitive processing: high-frequency instability (8–12 Hz tremor band) and low-frequency tracking error (0.5–3 Hz) during dual-task performance should explain perceptual errors, especially under physical load.
+
+### Why spectral features?
+
+Prior work treats grip as a binary effort covariate. We treat the 100 Hz stream as a **continuous behavioral phenotype**, extracting physics-informed features that survive target normalization (same arbitrary units as behavioral v3 `grip_force_mean_au`).
+
+---
+
+## 2. Cohort & attrition
+
+```{r}
+#| label: attrition-table
+
+attrition %>%
+  gt() %>%
+  tab_header(title = "Grip analysis attrition funnel") %>%
+  cols_label(
+    stage = "Stage",
+    n_subject_tasks = "Subject-tasks",
+    n_trials = "Trials",
+    note = "Note"
+  ) %>%
+  tab_options(table.font.size = px(13))
+```
+
+**Analysis set:** `r format(n_trials, big.mark = ",")` trials · `r n_subjects` subjects · aud + vis oddball only.
+
+---
+
+## 3. DSP pipeline
+
+Per trial, per 100 Hz sample:
+
+$$
+e(t) = \frac{F(t) - F_{\text{target}}}{F_{\text{target}}}, \quad F_{\text{target}} = \text{grip\_targ\_prop\_mvc} \times \text{mvc}
+$$
+
+1. **RMS error** on raw $e(t)$
+2. **Linear detrend** → **4th-order Butterworth high-pass @ 0.5 Hz** (`scipy.signal.sosfiltfilt`, zero-phase)
+3. **Welch PSD** → integrate **0.5–3 Hz** (tracking) and **8–12 Hz** (tremor)
+
+**Probe timing note:** `stim_offset` is **seconds** for visual trials (probe onset within epoch) but **Hz frequency shift** for auditory trials. Derived column `probe_onset_s` = `stim_offset` (vis) or 0 (aud).
+
+---
+
+## 4. Hero visualizations
+
+### 4.1 Signal chain — time domain + Welch PSD
+
+```{r}
+#| label: fig-anatomy
+#| fig-cap: "Single-trial signal chain: force, normalized error, rolling instability, and Welch PSD with DSP bands."
+
+knitr::include_graphics(fig_paths[1])
+```
+
+### 4.2 Probe-locked spectrogram (cognitive shock)
+
+```{r}
+#| label: fig-specgram
+#| fig-cap: "Probe-locked spectrogram: time × frequency power aligned to oddball onset (t = 0)."
+
+knitr::include_graphics(fig_paths[2])
+```
+
+### 4.3 Population spectral fingerprint
+
+```{r}
+#| label: fig-fingerprint
+#| fig-cap: "Distribution of log10 band power by grip effort and perceptual outcome."
+
+knitr::include_graphics(fig_paths[3])
+```
+
+### 4.4 Two-band feature space
+
+```{r}
+#| label: fig-feature-space
+#| fig-cap: "Tracking vs tremor band power; each point is one trial."
+
+knitr::include_graphics(fig_paths[4])
+```
+
+### 4.5 Behavioral lift — tremor × effort
+
+```{r}
+#| label: fig-lift
+#| fig-cap: "Model-predicted accuracy as a function of tremor-band power, split by grip effort."
+
+knitr::include_graphics(fig_paths[5])
+```
+
+---
+
+## 5. Mixed-effects modeling
+
+Trial-level logistic GLMMs with random intercepts for `subject_id`:
+
+- **Baseline:** `resp_is_correct ~ task_modality + stim_level_index + is_high_grip + (1 | subject_id)`
+- **DSP-augmented:** adds z-scored `pow_05_3hz` and `pow_8_12hz`
+
+```{r}
+#| label: fx-table
+
+fx_tbl %>%
+  rename(`OR (95% CI)` = OR..95..CI.) %>%
+  gt(groupname_col = "Model") %>%
+  tab_header(
+    title = "Fixed effects — perceptual accuracy",
+    subtitle = "Odds ratios (95% CI) from mixed-effects logistic regression"
+  ) %>%
+  cols_label(
+    Predictor = "Predictor",
+    `OR (95% CI)` = "OR (95% CI)",
+    p = "p"
+  ) %>%
+  tab_options(table.font.size = px(12))
+```
+
+**Interpretation:** Tremor-band power shows a significant positive association with correct responses (OR > 1) after adjusting for modality, difficulty, and effort — but the **joint** DSP block LRT is marginal at α = .05. Interpret tremor effect cautiously; consider single-term LRT and probe-locked sensitivity analyses.
+
+---
+
+## 6. Feature summaries
+
+```{r}
+#| label: feature-summary
+
+model_tbl %>%
+  filter(!is.na(pow_05_3hz), !is.na(pow_8_12hz)) %>%
+  summarise(
+    trials = n(),
+    `rms_error (mean)` = mean(rms_error, na.rm = TRUE),
+    `pow_0.5-3Hz (median)` = median(pow_05_3hz, na.rm = TRUE),
+    `pow_8-12Hz (median)` = median(pow_8_12hz, na.rm = TRUE),
+    accuracy = mean(tolower(as.character(resp_is_correct)) == "true", na.rm = TRUE)
+  ) %>%
+  gt() %>%
+  fmt_number(columns = c(`rms_error (mean)`, `pow_0.5-3Hz (median)`, `pow_8-12Hz (median)`), decimals = 4) %>%
+  fmt_percent(columns = accuracy, decimals = 1) %>%
+  tab_header(title = "Analysis-set feature summaries")
+```
+
+---
+
+## 7. Limitations & next steps
+
+1. **Whole-epoch features** — spectral summaries integrate the full ~2.94 s trial; probe-locked post-stimulus windows would tighten the cognitive-shock claim.
+2. **Missing grip files** — ~61 subject-tasks lack on-disk gripforce; file attrition, not participant failure.
+3. **Borderline LRT** — joint DSP improvement is marginal; tremor-only term is borderline significant.
+4. **Auditory probe timing** — `probe_onset_s = 0` for aud; visual trials have sub-second probe offsets.
+
+**Reproducibility:** Source modules — `01_ingest.qmd` (Python DSP), `02_cognitive_motor_model.qmd` (R GLMM), `03_hero_visuals.qmd` (R figures).
+
+---
+
+*Generated as a single self-contained HTML for portfolio review.*
+
+**Export one file for LLM upload:**
+
+```bash
+quarto render analysis/portfolio.qmd
+cp _site/analysis/portfolio.html portfolio_case_study.html
+```
+
+Open `portfolio_case_study.html` at the repo root — all figures are embedded (no external dependencies).

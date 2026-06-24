@@ -1,6 +1,7 @@
 project:
   type: website
   render:
+    - analysis/portfolio.qmd
     - analysis/index.qmd
     - analysis/01_ingest.qmd
     - analysis/02_cognitive_motor_model.qmd
@@ -10,6 +11,8 @@ website:
   title: "BAP Gripforce — Cognitive–Motor Interference"
   navbar:
     left:
+      - href: portfolio.qmd
+        text: "Portfolio (single file)"
       - href: index.qmd
         text: Overview
       - href: 01_ingest.qmd

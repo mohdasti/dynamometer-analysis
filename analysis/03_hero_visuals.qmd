@@ -21,10 +21,12 @@ fig-dpi: 180
 
 Portfolio-grade figures for quantitative UX / human-factors audiences:
 
-1. **Single-trial anatomy** — raw force, target-centered error, and rolling instability with probe-onset shading.
-2. **Behavioral lift** — adjusted accuracy as a function of tremor-band power, split by grip effort.
+1. **Single-trial signal chain** — time domain (force → error → instability) **+ Welch PSD** with tracking/tremor bands highlighted.
+2. **Probe-locked spectrogram** — time × frequency heatmap aligned to oddball onset (*t* = 0 at probe).
+3. **Population spectral fingerprint** — band-power distributions by grip effort and accuracy.
+4. **Behavioral lift** — adjusted accuracy as a function of tremor-band power, split by grip effort.
 
-Inputs: `reports/analysis_trial_table.csv` plus raw grip CSVs via `config/paths.local.yaml`.
+Inputs: `reports/analysis_trial_table.csv` plus raw grip CSVs via `config/paths.local.yaml`. Welch PSD for the hero trial is computed in Python (`scripts/export_hero_psd.py`) to match the ingest pipeline exactly.
 
 ```{r}
 #| label: install-packages
@@ -72,6 +74,13 @@ dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
 fs_hz <- 100
 trial_epoch_s <- 2.94
 probe_window_s <- 0.15
+tracking_band <- c(0.5, 3.0)
+tremor_band <- c(8.0, 12.0)
+
+band_colors <- c(
+  "Tracking\n0.5–3 Hz" = "#009E73",
+  "Tremor\n8–12 Hz" = "#CC79A7"
+)
 
 okabe <- c(
   "Low effort" = "#0072B2",
@@ -95,6 +104,13 @@ theme_hero <- function(base_size = 12) {
     )
 }
 
+probe_onset_s <- function(meta_row) {
+  if ("probe_onset_s" %in% names(meta_row)) meta_row$probe_onset_s else meta_row$stim_offset
+}
+
+band_rect <- function(fmin, fmax, fill, alpha = 0.22) {
+  annotate("rect", xmin = fmin, xmax = fmax, ymin = -Inf, ymax = Inf, fill = fill, alpha = alpha)
+}
 probe_rect <- function(stim_onset_s, width_s = probe_window_s) {
   annotate(
     "rect",
@@ -106,6 +122,8 @@ probe_rect <- function(stim_onset_s, width_s = probe_window_s) {
     alpha = 0.18
   )
 }
+
+# (band_rect defined above)
 
 panel_tag <- function(label) {
   annotate(
@@ -233,11 +251,43 @@ trace_label <- sprintf(
   hero_meta$session_num,
   hero_meta$trial_idx
 )
+
+hero_onset <- probe_onset_s(hero_meta)
+
+# Export hero metadata for Python PSD computation (matches ingest pipeline)
+hero_meta_path <- file.path(fig_dir, "_hero_meta.csv")
+hero_psd_path <- file.path(fig_dir, "_hero_psd.csv")
+write.csv(hero_meta, hero_meta_path, row.names = FALSE)
+
+py_script <- file.path(repo, "scripts", "export_hero_psd.py")
+py_cmd <- sprintf(
+  "python3 %s %s %s",
+  shQuote(py_script),
+  shQuote(hero_meta_path),
+  shQuote(hero_psd_path)
+)
+py_status <- system(py_cmd, intern = FALSE)
+if (py_status != 0) {
+  stop("Python PSD export failed. Run from repo root with python3 + scipy available.")
+}
+
+hero_psd <- read.csv(hero_psd_path)
+hero_psd_log <- hero_psd %>%
+  filter(freq_hz > 0) %>%
+  mutate(psd_log10 = log10(pmax(psd, .Machine$double.xmin)))
+
+hero_spec_path <- file.path(fig_dir, "_hero_spectrogram.csv")
+hero_spec <- read.csv(hero_spec_path) %>%
+  filter(freq_hz <= 20, power > 0) %>%
+  mutate(power_db = 10 * log10(power))
+
+trace_probe <- trace %>%
+  mutate(t_from_probe = t_rel_s - hero_onset)
 ```
 
 ```{r}
 #| label: visual-1-anatomy
-#| fig-cap: "Single-trial grip-force anatomy aligned to probe onset."
+#| fig-cap: "Single-trial signal chain: time domain (A–C) and Welch PSD (D) with DSP bands highlighted."
 
 p_force <- ggplot(trace, aes(x = t_rel_s, y = grip_force_au)) +
   geom_line(color = "#0072B2", linewidth = 0.75) +
@@ -247,51 +297,68 @@ p_force <- ggplot(trace, aes(x = t_rel_s, y = grip_force_au)) +
     color = "#999999",
     linewidth = 0.45
   ) +
-  probe_rect(hero_meta$stim_offset) +
+  probe_rect(hero_onset) +
   panel_tag("A") +
   scale_x_continuous(limits = c(0, trial_epoch_s), expand = c(0, 0)) +
-  labs(
-    x = NULL,
-    y = "Grip force (a.u.)"
-  ) +
+  labs(x = NULL, y = "Grip force (a.u.)") +
   theme_hero()
 
 p_error <- ggplot(trace, aes(x = t_rel_s, y = normalized_error)) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "#666666", linewidth = 0.45) +
   geom_line(color = "#009E73", linewidth = 0.75) +
-  probe_rect(hero_meta$stim_offset) +
+  probe_rect(hero_onset) +
   panel_tag("B") +
   scale_x_continuous(limits = c(0, trial_epoch_s), expand = c(0, 0)) +
-  labs(
-    x = NULL,
-    y = "Normalized error  (F - F_target) / F_target"
-  ) +
+  labs(x = NULL, y = "Normalized error") +
   theme_hero()
 
 p_instability <- ggplot(trace, aes(x = t_rel_s, y = rolling_var)) +
   geom_line(color = "#D55E00", linewidth = 0.8) +
-  probe_rect(hero_meta$stim_offset) +
+  probe_rect(hero_onset) +
   panel_tag("C") +
   scale_x_continuous(limits = c(0, trial_epoch_s), expand = c(0, 0)) +
   scale_y_continuous(labels = label_number(accuracy = 0.001)) +
+  labs(x = "Time within trial (s)", y = "Rolling variance") +
+  theme_hero()
+
+p_psd <- ggplot(hero_psd_log, aes(x = freq_hz, y = psd_log10)) +
+  band_rect(tracking_band[1], tracking_band[2], band_colors[[1]]) +
+  band_rect(tremor_band[1], tremor_band[2], band_colors[[2]]) +
+  geom_vline(xintercept = c(tracking_band, tremor_band), color = "grey70", linewidth = 0.3, linetype = "dotted") +
+  geom_line(color = "#332288", linewidth = 0.85) +
+  panel_tag("D") +
+  scale_x_continuous(limits = c(0, 20), breaks = seq(0, 20, 5), expand = c(0, 0)) +
   labs(
-    x = "Time within trial (s)",
-    y = "Rolling variance\n(instability)"
+    x = "Frequency (Hz)",
+    y = expression(log[10] ~ PSD)
+  ) +
+  annotate(
+    "text",
+    x = 1.5, y = max(hero_psd_log$psd_log10) * 0.95,
+    label = "Tracking\n0.5–3 Hz",
+    color = band_colors[[1]], size = 3.2, fontface = "bold", hjust = 0
+  ) +
+  annotate(
+    "text",
+    x = 10, y = max(hero_psd_log$psd_log10) * 0.95,
+    label = "Tremor\n8–12 Hz",
+    color = band_colors[[2]], size = 3.2, fontface = "bold", hjust = 0
   ) +
   theme_hero()
 
-fig_anatomy <- p_force / p_error / p_instability +
+fig_anatomy <- (p_force / p_error / p_instability) | p_psd +
+  plot_layout(widths = c(1.2, 1)) +
   plot_annotation(
-    title = "Single-Trial Grip Dynamics During Perceptual Decision",
+    title = "The Signal Chain: From Grip Force to Spectral Phenotype",
     subtitle = paste0(
       trace_label,
-      "<br>Shaded band = probe onset window (*stim_offset* = ",
-      format(hero_meta$stim_offset, nsmall = 2),
-      " s); dashed line in **A** = grip target."
+      "<br>Time panels: probe onset at *t* = ",
+      format(hero_onset, nsmall = 2),
+      " s (orange band). **D**: Welch PSD after target-normalization, detrend, and 0.5 Hz zero-phase high-pass."
     ),
     theme = theme(
       plot.title = element_markdown(face = "bold", size = 16, hjust = 0),
-      plot.subtitle = element_markdown(size = 11, color = "grey35", hjust = 0)
+      plot.subtitle = element_markdown(size = 10.5, color = "grey35", hjust = 0)
     )
   )
 
@@ -335,14 +402,221 @@ if (has_plotly) {
 ggsave(
   file.path(fig_dir, "hero_single_trial_anatomy.png"),
   fig_anatomy,
-  width = 9,
-  height = 10,
+  width = 11,
+  height = 9,
   dpi = 180,
   bg = "white"
 )
 ```
 
-## Visual 2 — Behavioral lift (DSP × effort)
+## Visual 4 — Probe-locked spectrogram (cognitive shock)
+
+Time–frequency power aligned so **probe onset = 0 s**. Pre-probe window shaded; tracking and tremor bands highlighted. Top panel shows normalized error on the same axis — the motor response to the perceptual event.
+
+```{r}
+#| label: visual-4-specgram
+#| fig-cap: "Probe-locked spectrogram with normalized error aligned to oddball onset."
+
+pre_probe_fill <- "#404040"
+
+p_probe_error <- ggplot(trace_probe, aes(x = t_from_probe, y = normalized_error)) +
+  annotate("rect", xmin = -Inf, xmax = 0, ymin = -Inf, ymax = Inf, fill = pre_probe_fill, alpha = 0.07) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey55", linewidth = 0.4) +
+  geom_vline(xintercept = 0, color = "#FFB000", linewidth = 0.85) +
+  geom_line(color = "#009E73", linewidth = 0.8) +
+  panel_tag("A") +
+  scale_x_continuous(limits = c(-0.25, 2.4), expand = c(0, 0)) +
+  labs(x = NULL, y = "Normalized error") +
+  theme_hero()
+
+db_limits <- quantile(hero_spec$power_db, c(0.05, 0.98), na.rm = TRUE)
+
+p_specgram <- ggplot(hero_spec, aes(x = time_from_probe_s, y = freq_hz, fill = power_db)) +
+  annotate("rect", xmin = -Inf, xmax = 0, ymin = -Inf, ymax = Inf, fill = pre_probe_fill, alpha = 0.18) +
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = tracking_band[1], ymax = tracking_band[2],
+           fill = band_colors[[1]], alpha = 0.12) +
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = tremor_band[1], ymax = tremor_band[2],
+           fill = band_colors[[2]], alpha = 0.12) +
+  geom_raster(interpolate = TRUE) +
+  geom_vline(xintercept = 0, color = "white", linewidth = 0.7, linetype = "dashed") +
+  panel_tag("B") +
+  scale_fill_viridis_c(
+    option = "magma",
+    name = "Power (dB)",
+    limits = db_limits,
+    oob = scales::squish
+  ) +
+  scale_x_continuous(limits = c(-0.25, 2.4), expand = c(0, 0)) +
+  scale_y_continuous(limits = c(0, 20), expand = c(0, 0), breaks = seq(0, 20, 5)) +
+  labs(
+    x = "Time from probe onset (s)",
+    y = "Frequency (Hz)"
+  ) +
+  theme_hero() +
+  theme(legend.key.height = unit(0.9, "cm"))
+
+fig_specgram <- p_probe_error / p_specgram +
+  plot_layout(heights = c(1, 2.4)) +
+  plot_annotation(
+    title = "The Cognitive Shock: Probe-Locked Motor Spectrogram",
+    subtitle = paste0(
+      trace_label,
+      "<br>**A** = normalized error; **B** = short-time spectrum. Vertical gold line = oddball probe (*t* = 0). ",
+      "Grey shading = pre-probe baseline. Green band = tracking (0.5–3 Hz); pink band = tremor (8–12 Hz)."
+    ),
+    theme = theme(
+      plot.title = element_markdown(face = "bold", size = 16, hjust = 0),
+      plot.subtitle = element_markdown(size = 10.5, color = "grey35", hjust = 0)
+    )
+  )
+
+fig_specgram
+```
+
+```{r}
+#| label: visual-4-specgram-interactive
+#| eval: !expr 'has_plotly && knitr::is_html_output()'
+
+if (has_plotly) {
+  plotly::ggplotly(p_specgram, tooltip = c("x", "y", "fill")) %>%
+    plotly::layout(
+      title = "Probe-locked spectrogram (hover to inspect frequency bursts)",
+      xaxis = list(title = "Time from probe onset (s)"),
+      yaxis = list(title = "Frequency (Hz)")
+    )
+}
+```
+
+```{r}
+#| label: save-visual-4
+#| include: false
+
+ggsave(
+  file.path(fig_dir, "hero_probe_locked_spectrogram.png"),
+  fig_specgram,
+  width = 10,
+  height = 7,
+  dpi = 180,
+  bg = "white"
+)
+```
+
+## Visual 2 — Population spectral fingerprint
+
+Trial-level band powers from the full analysis cohort, split by grip effort and perceptual outcome.
+
+```{r}
+#| label: visual-spectral-pop-data
+
+spec_dat <- model_tbl %>%
+  filter(
+    !is.na(pow_05_3hz), !is.na(pow_8_12hz), !is.na(resp_is_correct),
+    pow_05_3hz > 0, pow_8_12hz > 0
+  ) %>%
+  mutate(
+    grip_effort = ifelse(
+      tolower(as.character(is_high_grip)) == "true",
+      "High effort", "Low effort"
+    ),
+    outcome = ifelse(
+      tolower(as.character(resp_is_correct)) == "true",
+      "Correct", "Incorrect"
+    ),
+    grip_effort = factor(grip_effort, levels = c("Low effort", "High effort")),
+    outcome = factor(outcome, levels = c("Correct", "Incorrect")),
+    log_tracking = log10(pow_05_3hz),
+    log_tremor = log10(pow_8_12hz)
+  )
+
+spec_long <- spec_dat %>%
+  select(grip_effort, outcome, log_tracking, log_tremor) %>%
+  pivot_longer(
+    cols = c(log_tracking, log_tremor),
+    names_to = "band",
+    values_to = "log_power"
+  ) %>%
+  mutate(
+    band = recode(
+      band,
+      log_tracking = "Tracking (0.5–3 Hz)",
+      log_tremor = "Tremor (8–12 Hz)"
+    )
+  )
+```
+
+```{r}
+#| label: visual-spectral-pop
+#| fig-cap: "Population distribution of log10 band power by grip effort and perceptual outcome."
+
+p_spec_violin <- ggplot(spec_long, aes(x = outcome, y = log_power, fill = outcome)) +
+  geom_violin(trim = FALSE, alpha = 0.35, color = NA) +
+  geom_boxplot(width = 0.14, outlier.size = 0.4, alpha = 0.85, color = "grey25") +
+  facet_grid(band ~ grip_effort, scales = "free_y") +
+  scale_fill_manual(values = c("Correct" = "#009E73", "Incorrect" = "#D55E00")) +
+  scale_y_continuous(limits = c(-7, 0), breaks = seq(-6, 0, 2)) +
+  labs(
+    title = "Spectral Phenotype of Cognitive–Motor Interference",
+    subtitle = paste0(
+      "Trial-level band power across the analysis cohort (n = ",
+      format(nrow(spec_dat), big.mark = ","),
+      " trials with non-zero band power)"
+    ),
+    x = NULL,
+    y = expression(log[10] ~ "band power"),
+    caption = "Tracking band = visuomotor control; tremor band = physiological instability. Powers from target-normalized, filtered Welch PSD."
+  ) +
+  theme_hero() +
+  theme(legend.position = "none", strip.text = element_text(face = "bold"))
+
+p_spec_violin
+```
+
+```{r}
+#| label: visual-spectral-scatter
+#| fig-cap: "Feature space: tracking vs tremor band power, colored by accuracy."
+
+p_spec_scatter <- ggplot(spec_dat, aes(x = log_tracking, y = log_tremor, color = outcome)) +
+  geom_point(alpha = 0.25, size = 1.2) +
+  geom_density2d(color = "grey55", linewidth = 0.4, bins = 5) +
+  facet_wrap(~ grip_effort) +
+  scale_color_manual(values = c("Correct" = "#009E73", "Incorrect" = "#D55E00")) +
+  scale_x_continuous(limits = c(-5, 0)) +
+  scale_y_continuous(limits = c(-6, -2)) +
+  labs(
+    title = "Two-Band Feature Space",
+    subtitle = "Each point is one trial; contours show density. Errors cluster toward higher tremor under load.",
+    x = expression(log[10] ~ "tracking power (0.5–3 Hz)"),
+    y = expression(log[10] ~ "tremor power (8–12 Hz)"),
+    color = "Outcome"
+  ) +
+  theme_hero()
+
+p_spec_scatter
+```
+
+```{r}
+#| label: save-visual-spectral
+#| include: false
+
+ggsave(
+  file.path(fig_dir, "hero_spectral_fingerprint.png"),
+  p_spec_violin,
+  width = 9,
+  height = 6,
+  dpi = 180,
+  bg = "white"
+)
+ggsave(
+  file.path(fig_dir, "hero_spectral_feature_space.png"),
+  p_spec_scatter,
+  width = 9,
+  height = 4.5,
+  dpi = 180,
+  bg = "white"
+)
+```
+
+## Visual 3 — Behavioral lift (DSP × effort)
 
 Adjusted marginal accuracy from a mixed model with tremor × grip interaction, controlling for modality and difficulty.
 
@@ -489,5 +763,5 @@ ggsave(
 #| label: export-summary
 
 cat("Saved figures to:", fig_dir, "\n")
-list.files(fig_dir, pattern = "^hero_.*\\.png$", full.names = TRUE)
+list.files(fig_dir, pattern = "^hero_.*\\.(png|csv)$", full.names = TRUE)
 ```
