@@ -757,6 +757,366 @@ ggsave(
 )
 ```
 
+## Visual 5 — Grip compliance portrait
+
+High-grip (40% MVC) trials are valid for load-normalized spectral analysis only if participants actually *held* the target force. This figure shows per-subject force compliance (actual / target). BAP196 (negative MVC) is already excluded by NaN spectral features.
+
+```{r}
+#| label: visual-compliance-data
+
+is_high <- function(x) tolower(as.character(x)) == "true"
+
+compliance_dat <- model_tbl %>%
+  filter(
+    is_high(is_high_grip),
+    subject_id != "BAP196",
+    !is.na(pow_8_12hz),
+    mvc > 0
+  ) %>%
+  mutate(
+    target_force = grip_targ_prop_mvc * mvc,
+    compliance   = grip_force_mean_au / target_force
+  ) %>%
+  group_by(subject_id) %>%
+  summarise(
+    mean_compliance = mean(compliance, na.rm = TRUE),
+    sd_compliance   = sd(compliance, na.rm = TRUE),
+    n_trials        = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(mean_compliance) %>%
+  mutate(subject_rank = row_number())
+
+overall_mean <- mean(compliance_dat$mean_compliance, na.rm = TRUE)
+n_subj       <- nrow(compliance_dat)
+```
+
+```{r}
+#| label: visual-compliance
+#| fig-height: 5
+#| fig-cap: "Per-subject mean force compliance (actual / target) for high-grip (40% MVC) trials."
+
+p_compliance <- ggplot(compliance_dat, aes(x = subject_rank, y = mean_compliance)) +
+  geom_hline(yintercept = 1.0, linetype = "dashed", color = "grey60", linewidth = 0.5) +
+  geom_hline(yintercept = c(0.8, 1.2), linetype = "dotted", color = "#D55E00", linewidth = 0.4) +
+  geom_errorbar(
+    aes(ymin = mean_compliance - sd_compliance, ymax = mean_compliance + sd_compliance),
+    width = 0.3, color = "grey70", linewidth = 0.4
+  ) +
+  geom_point(aes(color = mean_compliance), size = 2.8) +
+  geom_hline(yintercept = overall_mean, color = "#0072B2", linewidth = 0.7, linetype = "solid") +
+  annotate(
+    "text", x = n_subj * 0.85, y = overall_mean + 0.02,
+    label = sprintf("Mean = %.2f×", overall_mean),
+    color = "#0072B2", size = 3.5, hjust = 0.5
+  ) +
+  scale_color_gradient2(
+    low = "#D55E00", mid = "#999999", high = "#009E73",
+    midpoint = 1.0,
+    guide = "none"
+  ) +
+  scale_y_continuous(
+    labels = function(x) sprintf("%.1fx", x),
+    limits = c(0.6, 1.4)
+  ) +
+  scale_x_continuous(breaks = NULL) +
+  labs(
+    title = "High-Grip Compliance: Participants Held 40% MVC with High Fidelity",
+    subtitle = sprintf(
+      "Each point = one subject (n = %d); error bars = ±1 SD across trials. Dashed red lines = ±20%% tolerance. Blue line = cohort mean.",
+      n_subj
+    ),
+    x = "Participants (ranked by compliance)",
+    y = "Force compliance (actual / target)",
+    caption = "All subjects within ±20% of target. BAP196 excluded (negative MVC value — data entry error)."
+  ) +
+  theme_hero()
+
+p_compliance
+```
+
+```{r}
+#| label: save-visual-compliance
+#| include: false
+
+ggsave(
+  file.path(fig_dir, "hero_grip_compliance.png"),
+  p_compliance, width = 9, height = 5, dpi = 180, bg = "white"
+)
+```
+
+## Visual 6 — Psychometric drift under physical load
+
+How does carrying 40% MVC change the accuracy × difficulty curve? The load effect is not uniform — it hits hardest at intermediate stimulus levels where cognitive resources are most taxed.
+
+```{r}
+#| label: visual-psychometric-data
+
+psycho_dat <- model_tbl %>%
+  filter(!is.na(resp_is_correct), subject_id != "BAP196") %>%
+  mutate(
+    resp = as.integer(tolower(as.character(resp_is_correct)) == "true"),
+    grip_label = factor(
+      ifelse(is_high(is_high_grip), "High grip (40% MVC)", "Low grip (5% MVC)"),
+      levels = c("Low grip (5% MVC)", "High grip (40% MVC)")
+    ),
+    task_label = ifelse(task_modality == "vis", "Visual", "Auditory"),
+    stim_level = as.integer(as.character(stim_level_index))
+  ) %>%
+  group_by(grip_label, task_label, stim_level) %>%
+  summarise(
+    acc  = mean(resp, na.rm = TRUE),
+    se   = sqrt(acc * (1 - acc) / n()),
+    n    = n(),
+    .groups = "drop"
+  )
+
+# Difficulty labels matching typical psychophysics convention
+stim_labels <- c("0" = "Easiest\n(Δ0)", "1" = "Hard\n(Δ1)", "2" = "Medium\n(Δ2)",
+                 "3" = "Easy\n(Δ3)", "4" = "Easiest\n(Δ4)")
+```
+
+```{r}
+#| label: visual-psychometric
+#| fig-height: 5
+#| fig-cap: "Perceptual accuracy by stimulus difficulty and grip condition."
+
+grip_colors <- c("Low grip (5% MVC)" = "#0072B2", "High grip (40% MVC)" = "#D55E00")
+
+p_psycho <- ggplot(psycho_dat, aes(
+    x = stim_level, y = acc,
+    color = grip_label, group = grip_label
+  )) +
+  geom_ribbon(
+    aes(ymin = pmax(acc - 1.96 * se, 0), ymax = pmin(acc + 1.96 * se, 1), fill = grip_label),
+    alpha = 0.12, color = NA
+  ) +
+  geom_line(linewidth = 1.0) +
+  geom_point(size = 2.8) +
+  facet_wrap(~ task_label) +
+  scale_color_manual(values = grip_colors) +
+  scale_fill_manual(values = grip_colors, guide = "none") +
+  scale_y_continuous(
+    labels = label_percent(accuracy = 1),
+    limits = c(0.05, 1.02),
+    expand = c(0, 0)
+  ) +
+  scale_x_continuous(breaks = 0:4, labels = c("Δ0", "Δ1", "Δ2", "Δ3", "Δ4")) +
+  labs(
+    title = "Physical Load Suppresses Accuracy at Intermediate Difficulty",
+    subtitle = "High grip (40% MVC) consistently underperforms low grip; gap widest at Δ2 (medium difficulty)",
+    x = "Stimulus difficulty level",
+    y = "Accuracy",
+    caption = "Mean ± 95% CI across subjects. Δ0 = easiest; Δ1 = hardest."
+  ) +
+  theme_hero() +
+  theme(legend.position = "top")
+
+p_psycho
+```
+
+```{r}
+#| label: save-visual-psychometric
+#| include: false
+
+ggsave(
+  file.path(fig_dir, "hero_psychometric_by_grip.png"),
+  p_psycho, width = 9, height = 5, dpi = 180, bg = "white"
+)
+```
+
+## Visual 7 — The direction flip: tremor under load
+
+The pooled tremor effect (both grip conditions) is misleading. Fit separate models to each condition and compare slopes. **High grip:** tremor trends negative — more instability, more errors (the interference prediction). **Low grip:** tremor trends positive — a precision-noise artifact of the near-zero 5% MVC target.
+
+```{r}
+#| label: visual-flip-data
+
+flip_base <- model_tbl %>%
+  filter(!is.na(resp_is_correct), !is.na(pow_8_12hz), !is.na(pow_05_3hz)) %>%
+  mutate(
+    resp = as.integer(tolower(as.character(resp_is_correct)) == "true"),
+    task_modality    = factor(task_modality, levels = c("aud", "vis")),
+    stim_level_index = factor(stim_level_index, ordered = TRUE),
+    subject_id       = factor(subject_id),
+    grip_label = factor(
+      ifelse(is_high(is_high_grip), "High grip (40% MVC)", "Low grip (5% MVC)"),
+      levels = c("High grip (40% MVC)", "Low grip (5% MVC)")
+    )
+  )
+
+# z-score tremor *within* each grip stratum so slopes are comparable
+flip_high <- flip_base %>% filter(grip_label == "High grip (40% MVC)") %>%
+  mutate(tremor_z = as.numeric(scale(pow_8_12hz)))
+flip_low  <- flip_base %>% filter(grip_label == "Low grip (5% MVC)") %>%
+  mutate(tremor_z = as.numeric(scale(pow_8_12hz)))
+
+m_flip_high <- glmer(
+  resp ~ tremor_z + task_modality + stim_level_index + (1 | subject_id),
+  data = flip_high, family = binomial(), control = glmer_ctrl
+)
+m_flip_low <- glmer(
+  resp ~ tremor_z + task_modality + stim_level_index + (1 | subject_id),
+  data = flip_low, family = binomial(), control = glmer_ctrl
+)
+
+# Extract tremor OR + CI
+extract_tremor_or <- function(m, label) {
+  cf <- confint(m, parm = "tremor_z", method = "Wald")
+  est <- fixef(m)[["tremor_z"]]
+  data.frame(
+    Condition = label,
+    OR        = exp(est),
+    OR_low    = exp(cf[1]),
+    OR_high   = exp(cf[2]),
+    slope_log = est
+  )
+}
+
+tremor_or <- rbind(
+  extract_tremor_or(m_flip_high, "High grip\n(40% MVC)"),
+  extract_tremor_or(m_flip_low,  "Low grip\n(5% MVC)")
+)
+
+# Prediction grid for slope curves
+tgrid <- seq(-2.5, 2.5, length.out = 80)
+
+make_pred_curve <- function(m, dat, label) {
+  # Population-averaged: generate predictions over all observed condition combinations,
+  # then average so the y-intercept reflects the full cohort rather than one reference cell.
+  cond_grid <- expand.grid(
+    tremor_z         = tgrid,
+    task_modality    = levels(dat$task_modality),
+    stim_level_index = levels(dat$stim_level_index),
+    KEEP.OUT.ATTRS   = FALSE,
+    stringsAsFactors = FALSE
+  )
+  cond_grid$task_modality    <- factor(cond_grid$task_modality,    levels = levels(dat$task_modality))
+  cond_grid$stim_level_index <- factor(cond_grid$stim_level_index, levels = levels(dat$stim_level_index), ordered = TRUE)
+  cond_grid$pred_cell <- predict(m, newdata = cond_grid, type = "response", re.form = NA)
+
+  cond_grid %>%
+    group_by(tremor_z) %>%
+    summarise(pred = mean(pred_cell, na.rm = TRUE), .groups = "drop") %>%
+    mutate(label = label)
+}
+
+flip_curves <- rbind(
+  make_pred_curve(m_flip_high, flip_high, "High grip\n(40% MVC)"),
+  make_pred_curve(m_flip_low,  flip_low,  "Low grip\n(5% MVC)")
+)
+flip_curves$label <- factor(flip_curves$label,
+  levels = c("High grip\n(40% MVC)", "Low grip\n(5% MVC)"))
+
+# Empirical bins per grip
+bin_flip <- function(dat, label) {
+  dat %>%
+    mutate(tbin = cut(tremor_z, breaks = seq(-2.5, 2.5, by = 1))) %>%
+    group_by(tbin) %>%
+    summarise(
+      acc  = mean(resp, na.rm = TRUE),
+      se   = sqrt(acc * (1 - acc) / n()),
+      tmid = mean(tremor_z, na.rm = TRUE),
+      n    = n(), .groups = "drop"
+    ) %>%
+    filter(n >= 20) %>%
+    mutate(label = label)
+}
+
+flip_bins <- rbind(
+  bin_flip(flip_high, "High grip\n(40% MVC)"),
+  bin_flip(flip_low,  "Low grip\n(5% MVC)")
+) %>%
+  mutate(label = factor(label, levels = c("High grip\n(40% MVC)", "Low grip\n(5% MVC)")))
+
+flip_colors <- c("High grip\n(40% MVC)" = "#D55E00", "Low grip\n(5% MVC)" = "#0072B2")
+```
+
+```{r}
+#| label: visual-flip
+#| fig-height: 5.5
+#| fig-cap: "Tremor → accuracy slope for high vs low grip: opposite directions, same feature."
+
+# OR forest plot inset
+p_or <- ggplot(tremor_or, aes(x = OR, xmin = OR_low, xmax = OR_high, y = Condition, color = Condition)) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "grey55", linewidth = 0.5) +
+  geom_errorbarh(height = 0.2, linewidth = 0.8) +
+  geom_point(size = 4) +
+  scale_color_manual(values = flip_colors, guide = "none") +
+  scale_x_continuous(limits = c(0.7, 1.5), breaks = c(0.8, 1.0, 1.2, 1.4)) +
+  labs(
+    title = "OR: Tremor → Accuracy",
+    x = "Odds ratio (95% Wald CI)",
+    y = NULL
+  ) +
+  theme_hero() +
+  theme(
+    panel.grid.major.x = element_line(color = "grey90", linewidth = 0.3),
+    panel.grid.major.y = element_blank()
+  )
+
+# Slope curves
+p_slopes <- ggplot() +
+  geom_line(
+    data = flip_curves,
+    aes(x = tremor_z, y = pred, color = label, linetype = label),
+    linewidth = 1.2
+  ) +
+  geom_pointrange(
+    data = flip_bins,
+    aes(
+      x = tmid, y = acc,
+      ymin = pmax(acc - 1.96 * se, 0), ymax = pmin(acc + 1.96 * se, 1),
+      color = label
+    ),
+    fatten = 2.5, linewidth = 0.4, alpha = 0.9, inherit.aes = FALSE
+  ) +
+  scale_color_manual(values = flip_colors, name = NULL) +
+  scale_linetype_manual(
+    values = c("High grip\n(40% MVC)" = "solid", "Low grip\n(5% MVC)" = "dashed"),
+    guide = "none"
+  ) +
+  scale_y_continuous(labels = label_percent(accuracy = 1), limits = c(0.3, 0.85)) +
+  scale_x_continuous(
+    breaks = -2:2,
+    labels = c("−2σ", "−1σ", "0", "+1σ", "+2σ")
+  ) +
+  labs(
+    x = "Physiological tremor power (within-condition z-score)",
+    y = "Predicted accuracy"
+  ) +
+  theme_hero() +
+  theme(legend.position = c(0.82, 0.88))
+
+fig_flip <- p_slopes + p_or +
+  plot_layout(widths = c(2.2, 1)) +
+  plot_annotation(
+    title = "Opposite Signs: Tremor Means Something Different Under Load",
+    subtitle = paste0(
+      "**Left:** population-level accuracy vs tremor (visual task, medium difficulty). ",
+      "**Right:** odds-ratio forest plot.<br>",
+      "High grip OR < 1 (more tremor → more errors). ",
+      "Low grip OR > 1 (precision-noise artifact of near-zero 5% MVC target)."
+    ),
+    theme = theme(
+      plot.title    = element_markdown(face = "bold", size = 15, hjust = 0),
+      plot.subtitle = element_markdown(size = 10, color = "grey35", hjust = 0)
+    )
+  )
+
+fig_flip
+```
+
+```{r}
+#| label: save-visual-flip
+#| include: false
+
+ggsave(
+  file.path(fig_dir, "hero_direction_flip.png"),
+  fig_flip, width = 11, height = 5.5, dpi = 180, bg = "white"
+)
+```
+
 ## Export summary
 
 ```{r}

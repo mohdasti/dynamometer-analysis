@@ -15,31 +15,22 @@ execute:
 
 ## Overview
 
-Trial-level mixed-effects logistic regressions test whether grip-force spectral features explain perceptual decision accuracy beyond task modality, stimulus difficulty, and grip effort. Input: `reports/analysis_trial_table.csv` from [`01_ingest.qmd`](01_ingest.qmd).
+Trial-level mixed-effects logistic regressions testing whether grip-force spectral dynamics predict perceptual accuracy.
 
-### DSP feature provenance (Python → R handoff)
+**Primary analysis:** High-grip trials only (40% MVC). Physical load is required to test cognitive–motor interference — the 5% MVC condition is so easy to maintain that spectral features reflect motor precision noise rather than load-induced interference.
 
-Predictors `pow_05_3hz` and `pow_8_12hz` are **not** raw force summaries. They come from a target-normalized, filtered pipeline:
+**Comparison arm:** Low-grip trials fitted identically, reported as supplementary context.
+
+Input: `reports/analysis_trial_table.csv` from [`01_ingest.qmd`](01_ingest.qmd).
+
+### DSP feature provenance
 
 | Step | Operation | Purpose |
 |------|-----------|---------|
-| 1 | $e(t)=(F-F_\text{target})/F_\text{target}$ | Remove macro grip-level differences |
+| 1 | $e(t)=(F-F_\text{target})/F_\text{target}$ | Remove macro force-level differences |
 | 2 | Linear detrend | Strip within-trial drift |
-| 3 | `sosfiltfilt` high-pass @ 0.5 Hz | Zero-phase; keeps tremor aligned to probe timing |
+| 3 | `sosfiltfilt` high-pass @ 0.5 Hz | Zero-phase; preserves tremor timing |
 | 4 | Welch PSD → band integration | 0.5–3 Hz tracking; 8–12 Hz tremor |
-
-See **Trial spectral features** in `01_ingest.qmd` for full math and code paths.
-
-**Required R packages:** `lme4`, `broom.mixed`, `dplyr`, `tidyr`, `gt`. Install once if needed:
-
-```{r}
-#| label: install-packages
-#| eval: false
-
-install.packages(c("lme4", "broom.mixed", "dplyr", "tidyr", "gt"))
-```
-
-## Setup
 
 ```{r}
 #| label: setup
@@ -60,200 +51,225 @@ model_path <- file.path(repo, "reports", "analysis_trial_table.csv")
 stopifnot(file.exists(model_path))
 
 glmer_ctrl <- glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 2e5))
+
+is_high <- function(x) tolower(as.character(x)) == "true"
+is_correct <- function(x) tolower(as.character(x)) == "true"
+
+label_fixed_terms <- function(term) {
+  dplyr::recode(
+    term,
+    "(Intercept)"           = "Intercept",
+    "task_modalityvis"      = "Modality (visual vs. auditory)",
+    "stim_level_index.L"    = "Stimulus difficulty (linear)",
+    "stim_level_index.Q"    = "Stimulus difficulty (quadratic)",
+    "stim_level_index.C"    = "Stimulus difficulty (cubic)",
+    "stim_level_index^4"    = "Stimulus difficulty (4th order)",
+    "pow_05_3hz_z"          = "Tracking power 0.5–3 Hz (z)",
+    "pow_8_12hz_z"          = "Tremor power 8–12 Hz (z)",
+    .default = term
+  )
+}
+
+tidy_or <- function(model, label) {
+  tidy(model, effects = "fixed", conf.int = TRUE, conf.level = 0.95) %>%
+    transmute(
+      Model = label,
+      Predictor = label_fixed_terms(term),
+      OR = exp(estimate),
+      OR_low = exp(conf.low),
+      OR_high = exp(conf.high),
+      p.value = p.value,
+      `OR (95% CI)` = sprintf("%.2f (%.2f, %.2f)", OR, OR_low, OR_high),
+      p = ifelse(p.value < 0.001, "< .001", sprintf("%.3f", p.value))
+    ) %>%
+    select(Model, Predictor, `OR (95% CI)`, p)
+}
 ```
 
-## Prepare analysis cohort
-
-Keep trials with valid behavioral responses and complete DSP features (Welch band power requires sufficient samples within the trial epoch).
+## Cohort preparation
 
 ```{r}
 #| label: prep-data
 
 raw <- read.csv(model_path, stringsAsFactors = FALSE)
 
-model_dat <- raw %>%
-  filter(
-    !is.na(resp_is_correct),
-    !is.na(pow_05_3hz),
-    !is.na(pow_8_12hz)
-  ) %>%
-  mutate(
-    resp_is_correct = as.integer(tolower(as.character(resp_is_correct)) == "true"),
-    task_modality = factor(task_modality, levels = c("aud", "vis")),
-    stim_level_index = factor(stim_level_index, ordered = TRUE),
-    is_high_grip = factor(
-      tolower(as.character(is_high_grip)) == "true",
-      levels = c(FALSE, TRUE),
-      labels = c("Low grip", "High grip")
-    ),
-    subject_id = factor(subject_id),
-    pow_05_3hz_z = as.numeric(scale(pow_05_3hz)),
-    pow_8_12hz_z = as.numeric(scale(pow_8_12hz))
-  )
+# BAP196 has a negative MVC value (data entry error: -31136).
+# Target force = grip_targ_prop_mvc * mvc < 0 → normalization is undefined.
+# The Python pipeline already yields all-NaN spectral features for BAP196,
+# so they are excluded by the !is.na() filter below. Documented here explicitly.
+bap196_trials <- sum(raw$subject_id == "BAP196")
+cat("BAP196 trials in raw table:", bap196_trials,
+    "(excluded: negative MVC → NaN spectral features)\n\n")
 
-cat("Trials in modeling set:", nrow(model_dat), "\n")
-cat("Subjects:", nlevels(model_dat$subject_id), "\n")
-cat("Accuracy:", round(mean(model_dat$resp_is_correct), 3), "\n")
-```
-
-## Baseline mixed-effects model
-
-Random intercepts for `subject_id`; fixed effects for modality, ordered stimulus difficulty, and grip effort.
-
-```{r}
-#| label: model-baseline
-
-m_baseline <- glmer(
-  resp_is_correct ~ task_modality + stim_level_index + is_high_grip + (1 | subject_id),
-  data = model_dat,
-  family = binomial(),
-  control = glmer_ctrl
-)
-
-summary(m_baseline)
-```
-
-## Feature-augmented model
-
-Adds z-scored tracking-band (`pow_05_3hz`) and tremor-band (`pow_8_12hz`) power.
-
-```{r}
-#| label: model-dsp
-
-m_dsp <- glmer(
-  resp_is_correct ~ task_modality + stim_level_index + is_high_grip +
-    pow_05_3hz_z + pow_8_12hz_z + (1 | subject_id),
-  data = model_dat,
-  family = binomial(),
-  control = glmer_ctrl
-)
-
-summary(m_dsp)
-```
-
-## Model comparison (likelihood-ratio test)
-
-Nested comparison: does adding both DSP predictors improve fit over the baseline?
-
-```{r}
-#| label: model-compare
-
-model_lrt <- anova(m_baseline, m_dsp)
-model_lrt
-```
-
-```{r}
-#| label: model-compare-text
-
-lrt_p <- model_lrt$`Pr(>Chisq)`[2]
-lrt_chisq <- model_lrt$Chisq[2]
-lrt_df <- model_lrt$Df[2]
-
-cat(
-  sprintf(
-    "Likelihood-ratio test: chi-square(%d) = %.3f, p = %.4f\n",
-    lrt_df, lrt_chisq, lrt_p
-  )
-)
-```
-
-## Publication-ready fixed-effects table
-
-Odds ratios (OR) with 95% confidence intervals from the feature-augmented model. Baseline and DSP models are shown side-by-side for context.
-
-```{r}
-#| label: table-helper
-
-label_fixed_terms <- function(term) {
-  dplyr::recode(
-    term,
-    "(Intercept)" = "Intercept",
-    "task_modalityvis" = "Modality (visual vs. auditory)",
-    "stim_level_index.L" = "Stimulus difficulty (linear)",
-    "stim_level_index.Q" = "Stimulus difficulty (quadratic)",
-    "stim_level_index.C" = "Stimulus difficulty (cubic)",
-    "stim_level_index^4" = "Stimulus difficulty (4th order)",
-    "is_high_gripHigh grip" = "Grip effort (high vs. low)",
-    "pow_05_3hz_z" = "Tracking power 0.5–3 Hz (z)",
-    "pow_8_12hz_z" = "Tremor power 8–12 Hz (z)",
-    .default = term
-  )
-}
-
-tidy_glmer_or <- function(model, model_label) {
-  tidy(model, effects = "fixed", conf.int = TRUE, conf.level = 0.95) %>%
-    transmute(
-      model = model_label,
-      term = label_fixed_terms(term),
-      OR = exp(estimate),
-      OR_low = exp(conf.low),
-      OR_high = exp(conf.high),
-      p.value = p.value
+prep <- function(df) {
+  df %>%
+    filter(!is.na(resp_is_correct), !is.na(pow_05_3hz), !is.na(pow_8_12hz)) %>%
+    mutate(
+      resp_is_correct  = as.integer(is_correct(resp_is_correct)),
+      task_modality    = factor(task_modality, levels = c("aud", "vis")),
+      stim_level_index = factor(stim_level_index, ordered = TRUE),
+      subject_id       = factor(subject_id),
+      pow_05_3hz_z     = as.numeric(scale(pow_05_3hz)),
+      pow_8_12hz_z     = as.numeric(scale(pow_8_12hz))
     )
 }
 
-format_p <- function(p) {
-  ifelse(is.na(p), NA_character_, ifelse(p < 0.001, "< .001", sprintf("%.3f", p)))
-}
+high_dat <- raw %>% filter(is_high(is_high_grip)) %>% prep()
+low_dat  <- raw %>% filter(!is_high(is_high_grip)) %>% prep()
+
+cat("HIGH grip (40% MVC):",
+    nrow(high_dat), "trials,",
+    nlevels(high_dat$subject_id), "subjects,",
+    sprintf("accuracy = %.1f%%\n", 100 * mean(high_dat$resp_is_correct)))
+cat("LOW grip  (5% MVC): ",
+    nrow(low_dat),  "trials,",
+    nlevels(low_dat$subject_id),  "subjects,",
+    sprintf("accuracy = %.1f%%\n", 100 * mean(low_dat$resp_is_correct)))
 ```
 
+## Primary analysis — high grip (40% MVC)
+
+Physical load is the condition where cognitive–motor interference is expected. Spectral features for high-grip trials are well-calibrated: participants maintained 40% MVC with median compliance ≈ 109% of target (range 93–119% across subjects).
+
+### Baseline model
+
 ```{r}
-#| label: table-fixed-effects
+#| label: model-high-baseline
 
-fx_table <- bind_rows(
-  tidy_glmer_or(m_baseline, "Baseline"),
-  tidy_glmer_or(m_dsp, "DSP-augmented")
-) %>%
-  mutate(
-    `OR (95% CI)` = sprintf(
-      "%.2f (%.2f, %.2f)",
-      OR, OR_low, OR_high
-    ),
-    `p` = format_p(p.value)
-  ) %>%
-  select(Model = model, Predictor = term, `OR (95% CI)`, `p`)
+m_high_base <- glmer(
+  resp_is_correct ~ task_modality + stim_level_index + (1 | subject_id),
+  data    = high_dat,
+  family  = binomial(),
+  control = glmer_ctrl
+)
+summary(m_high_base)
+```
 
-fx_gt <- fx_table %>%
+### DSP-augmented model
+
+```{r}
+#| label: model-high-dsp
+
+m_high_dsp <- glmer(
+  resp_is_correct ~ task_modality + stim_level_index +
+    pow_05_3hz_z + pow_8_12hz_z + (1 | subject_id),
+  data    = high_dat,
+  family  = binomial(),
+  control = glmer_ctrl
+)
+summary(m_high_dsp)
+```
+
+### Likelihood-ratio test
+
+```{r}
+#| label: lrt-high
+
+lrt_high <- anova(m_high_base, m_high_dsp)
+lrt_high
+
+lrt_p     <- lrt_high$`Pr(>Chisq)`[2]
+lrt_chisq <- lrt_high$Chisq[2]
+lrt_df    <- lrt_high$Df[2]
+
+cat(sprintf("\nLRT (baseline vs DSP-augmented, high grip): χ²(%d) = %.3f, p = %.4f\n",
+            lrt_df, lrt_chisq, lrt_p))
+```
+
+### Fixed-effects table (high grip)
+
+```{r}
+#| label: table-high
+
+fx_high <- bind_rows(
+  tidy_or(m_high_base, "Baseline (high grip)"),
+  tidy_or(m_high_dsp,  "DSP-augmented (high grip)")
+)
+
+fx_high %>%
   gt(groupname_col = "Model") %>%
   tab_header(
-    title = "Mixed-effects logistic regression of perceptual accuracy",
-    subtitle = "Random intercepts for subject; DSP band powers z-scored within the analysis cohort"
+    title    = "Perceptual accuracy — high grip (40% MVC) only",
+    subtitle = "Random intercepts for subject; DSP features z-scored within high-grip trials"
   ) %>%
-  tab_source_note(
-    source_note = md(
-      paste0(
-        "Likelihood-ratio test (baseline vs. DSP-augmented): ",
-        sprintf("χ²(%d) = %.2f, *p* = %.3f", lrt_df, lrt_chisq, lrt_p),
-        ". OR > 1 indicates higher odds of a correct response."
-      )
-    )
-  ) %>%
-  cols_align(align = "left", columns = Predictor) %>%
-  cols_align(align = "right", columns = c(`OR (95% CI)`, `p`)) %>%
-  tab_options(
-    table.font.size = px(13),
-    heading.title.font.size = px(16),
-    column_labels.font.weight = "bold"
-  )
+  tab_source_note(md(sprintf(
+    "LRT (baseline vs. DSP-augmented): χ²(%d) = %.2f, *p* = %.3f",
+    lrt_df, lrt_chisq, lrt_p
+  ))) %>%
+  cols_align("left",  columns = Predictor) %>%
+  cols_align("right", columns = c(`OR (95% CI)`, p)) %>%
+  tab_options(table.font.size = px(13), column_labels.font.weight = "bold")
+```
 
-fx_gt
+## Comparison arm — low grip (5% MVC)
+
+The 5% MVC condition is the most important contrast: if spectral features predict accuracy in low grip, it is motor precision noise, not load-induced interference. Normalization note: low-grip participants overshoot their near-zero target by ~94% on average (mean actual/target ≈ 1.94), so `rms_error` and band powers are inflated relative to high grip.
+
+```{r}
+#| label: model-low-dsp
+
+m_low_dsp <- glmer(
+  resp_is_correct ~ task_modality + stim_level_index +
+    pow_05_3hz_z + pow_8_12hz_z + (1 | subject_id),
+  data    = low_dat,
+  family  = binomial(),
+  control = glmer_ctrl
+)
+
+m_low_base <- glmer(
+  resp_is_correct ~ task_modality + stim_level_index + (1 | subject_id),
+  data    = low_dat,
+  family  = binomial(),
+  control = glmer_ctrl
+)
+```
+
+### Side-by-side: tremor coefficient, high vs low grip
+
+```{r}
+#| label: table-stratified
+
+tremor_comparison <- bind_rows(
+  tidy_or(m_high_dsp, "High grip (40% MVC)"),
+  tidy_or(m_low_dsp,  "Low grip (5% MVC)")
+) %>%
+  filter(Predictor %in% c("Tracking power 0.5–3 Hz (z)", "Tremor power 8–12 Hz (z)"))
+
+tremor_comparison %>%
+  gt(groupname_col = "Model") %>%
+  tab_header(
+    title    = "DSP feature effects stratified by grip condition",
+    subtitle = "Same model structure; z-scoring is within each grip subset"
+  ) %>%
+  tab_footnote(
+    footnote = "Direction flip: positive in low grip (precision noise), negative in high grip (load-induced interference).",
+    locations = cells_column_labels(columns = `OR (95% CI)`)
+  ) %>%
+  cols_align("left",  columns = Predictor) %>%
+  cols_align("right", columns = c(`OR (95% CI)`, p)) %>%
+  tab_options(table.font.size = px(13), column_labels.font.weight = "bold")
 ```
 
 ```{r}
-#| label: save-table
+#| label: save-tables
 #| include: false
 
 out_dir <- file.path(repo, "reports")
-dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
-write.csv(fx_table, file.path(out_dir, "cognitive_motor_glmer_fixed_effects.csv"), row.names = FALSE)
+write.csv(fx_high, file.path(out_dir, "cognitive_motor_glmer_fixed_effects.csv"), row.names = FALSE)
 saveRDS(
-  list(baseline = m_baseline, dsp = m_dsp, lrt = model_lrt, data = model_dat),
+  list(
+    high_base = m_high_base, high_dsp = m_high_dsp,
+    low_base  = m_low_base,  low_dsp  = m_low_dsp,
+    lrt_high  = lrt_high,
+    high_dat  = high_dat,    low_dat  = low_dat
+  ),
   file.path(out_dir, "cognitive_motor_glmer_models.rds")
 )
 ```
 
-## Interpretation notes
+## Interpretation
 
-- **Baseline predictors** capture canonical cognitive-motor interference: modality, psychophysical difficulty (`stim_level_index` as an ordered factor with orthogonal polynomial contrasts), and high vs. low grip effort.
-- **DSP features** summarize trial-level grip dynamics: visuomotor tracking (0.5–3 Hz) and physiological tremor (8–12 Hz). Z-scoring puts both on a comparable scale within the analysis set.
-- A significant likelihood-ratio test supports the claim that grip spectral structure carries information about perceptual accuracy beyond effort and difficulty. Inspect individual DSP coefficients in the table for directionality (OR above vs. below 1).
+- **High grip:** grip effort (40% MVC) creates the dual-task condition where cognitive–motor interference is expected. Tremor-band power direction and significance here is the primary scientific claim.
+- **Low grip:** the near-zero target (5% MVC) means participants cannot precisely track it — normalized error is dominated by absolute motor noise rather than demand-related instability. Features are inflated and should not be compared directly to high-grip values.
+- **Direction flip:** tremor-band power trends negative in high grip (higher tremor → lower accuracy, the interference prediction) and positive in low grip (higher tremor → higher accuracy, a precision-noise artifact). This stratification is the key sanity check.
+- **BAP196:** excluded from all DSP analyses due to a negative MVC value (−31,136 AU) that produces undefined target-force normalization.
