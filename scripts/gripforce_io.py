@@ -423,52 +423,95 @@ def grip_attrition_funnel(coverage: pd.DataFrame) -> pd.DataFrame:
     Stage counts for a CONSORT-style grip force analysis flow diagram.
 
     Reports both subject-task rows and **merged trial totals** at each stage.
+
+    Notes
+    -----
+    * **No grip files** — entire subject×task blocks with zero grip CSVs on disk
+      (sums behavioral trials, not per-trial join failures).
+    * **Partial grip** — subject×task has some grip files but fewer grip trials
+      than behavioral trials (typically 1 run ≈ 30 trials vs ~150 behavioral).
     """
     retainable = coverage.loc[coverage["beh_retainable"]]
+    retainable_beh = int(retainable["beh_trials"].sum())
+
+    no_grip = retainable.loc[~retainable["grip_has_files"]]
+    partial_grip = retainable.loc[
+        retainable["grip_has_files"] & (retainable["beh_minus_grip"] > 0)
+    ]
     with_grip = retainable.loc[retainable["grip_has_files"]]
     analysis = coverage.loc[coverage["analysis_ready"]]
 
-    return pd.DataFrame(
-        [
-            {
-                "stage": "Oddball subject-tasks in behavioral v3",
-                "n_subject_tasks": len(coverage),
-                "n_trials": int(coverage["beh_trials"].sum()),
-                "note": "aud + vis; runs merged into trial counts",
-            },
-            {
-                "stage": "Excluded: aborted mid-task",
-                "n_subject_tasks": int(coverage["drop_aborted"].sum()),
-                "n_trials": int(
-                    coverage.loc[coverage["drop_aborted"], "beh_trials"].sum()
-                ),
-                "note": f"beh_trials < {ABORT_TRIAL_THRESHOLD}",
-            },
-            {
-                "stage": "Retainable subject-tasks",
-                "n_subject_tasks": len(retainable),
-                "n_trials": int(retainable["beh_trials"].sum()),
-                "note": "individual missed trials already removed in v3",
-            },
-            {
-                "stage": "Missing gripforce trials on disk",
-                "n_subject_tasks": int((retainable["grip_has_files"] == False).sum()),  # noqa: E712
-                "n_trials": int(
-                    retainable.loc[~retainable["grip_has_files"], "beh_trials"].sum()
-                ),
-                "note": "behavioral trials without matching grip files",
-            },
-            {
-                "stage": "Gripforce trials on disk",
-                "n_subject_tasks": len(with_grip),
-                "n_trials": int(with_grip["grip_trials"].sum()),
-                "note": "fatigue-break runs merged per session",
-            },
-            {
-                "stage": "Analysis set (trial features extracted)",
-                "n_subject_tasks": len(analysis),
-                "n_trials": int(analysis["feat_trials"].sum()),
-                "note": "primary grip force modeling cohort",
-            },
-        ]
-    )
+    no_grip_beh = int(no_grip["beh_trials"].sum())
+    partial_beh = int(partial_grip["beh_minus_grip"].sum())
+    grip_on_disk = int(with_grip["grip_trials"].sum())
+    feat_loss = int(with_grip["grip_minus_feat"].sum())
+    analysis_trials = int(analysis["feat_trials"].sum())
+
+    def pct(n: int) -> float | None:
+        if retainable_beh == 0:
+            return None
+        return round(100.0 * n / retainable_beh, 1)
+
+    rows = [
+        {
+            "stage": "Oddball subject-tasks in behavioral v3",
+            "n_subject_tasks": len(coverage),
+            "n_trials": int(coverage["beh_trials"].sum()),
+            "pct_of_retainable_beh": None,
+            "note": "aud + vis; runs merged into trial counts",
+        },
+        {
+            "stage": "Excluded: aborted mid-task",
+            "n_subject_tasks": int(coverage["drop_aborted"].sum()),
+            "n_trials": int(
+                coverage.loc[coverage["drop_aborted"], "beh_trials"].sum()
+            ),
+            "pct_of_retainable_beh": None,
+            "note": f"beh_trials < {ABORT_TRIAL_THRESHOLD}",
+        },
+        {
+            "stage": "Retainable subject-tasks",
+            "n_subject_tasks": len(retainable),
+            "n_trials": retainable_beh,
+            "pct_of_retainable_beh": 100.0,
+            "note": "individual missed trials already removed in v3",
+        },
+        {
+            "stage": "No grip files (entire subject×task)",
+            "n_subject_tasks": len(no_grip),
+            "n_trials": no_grip_beh,
+            "pct_of_retainable_beh": pct(no_grip_beh),
+            "note": "zero grip CSVs found; all behavioral trials in block excluded",
+        },
+        {
+            "stage": "Partial grip (behavioral > on-disk grip)",
+            "n_subject_tasks": len(partial_grip),
+            "n_trials": partial_beh,
+            "pct_of_retainable_beh": pct(partial_beh),
+            "note": "some grip files exist but fewer trials than behavioral (often 1 run ≈ 30 trials)",
+        },
+        {
+            "stage": "Grip trials on disk",
+            "n_subject_tasks": len(with_grip),
+            "n_trials": grip_on_disk,
+            "pct_of_retainable_beh": pct(grip_on_disk),
+            "note": "fatigue-break runs merged per session; retainable subject-tasks only",
+        },
+        {
+            "stage": "Feature extraction loss",
+            "n_subject_tasks": int(
+                (with_grip["grip_minus_feat"] > 0).sum()
+            ),
+            "n_trials": feat_loss,
+            "pct_of_retainable_beh": pct(feat_loss),
+            "note": "grip trials present but spectral features not extracted (short epochs, etc.)",
+        },
+        {
+            "stage": "Analysis set (trial features extracted)",
+            "n_subject_tasks": len(analysis),
+            "n_trials": analysis_trials,
+            "pct_of_retainable_beh": pct(analysis_trials),
+            "note": "primary grip force modeling cohort",
+        },
+    ]
+    return pd.DataFrame(rows)

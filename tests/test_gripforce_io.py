@@ -168,13 +168,15 @@ def test_summarize_trial_coverage_counts():
 def test_grip_attrition_funnel_stages():
     coverage = pd.DataFrame(
         {
-            "beh_trials": [100, 80, 50, 90],
-            "grip_trials": [100, 0, 0, 90],
-            "feat_trials": [100, 0, 0, 90],
-            "beh_retainable": [True, True, False, True],
-            "drop_aborted": [False, False, True, False],
-            "grip_has_files": [True, False, False, True],
-            "analysis_ready": [True, False, False, True],
+            "beh_trials": [100, 80, 50, 150, 90],
+            "grip_trials": [100, 0, 0, 30, 90],
+            "feat_trials": [100, 0, 0, 28, 90],
+            "beh_retainable": [True, True, False, True, True],
+            "drop_aborted": [False, False, True, False, False],
+            "grip_has_files": [True, False, False, True, True],
+            "analysis_ready": [True, False, False, True, True],
+            "beh_minus_grip": [0, 80, 50, 120, 0],
+            "grip_minus_feat": [0, 0, 0, 2, 0],
         }
     )
     funnel = grip_attrition_funnel(coverage)
@@ -182,13 +184,24 @@ def test_grip_attrition_funnel_stages():
         "Oddball subject-tasks in behavioral v3",
         "Excluded: aborted mid-task",
         "Retainable subject-tasks",
-        "Missing gripforce trials on disk",
-        "Gripforce trials on disk",
+        "No grip files (entire subject×task)",
+        "Partial grip (behavioral > on-disk grip)",
+        "Grip trials on disk",
+        "Feature extraction loss",
         "Analysis set (trial features extracted)",
     ]
-    assert funnel.loc[
+    no_grip = funnel.loc[
+        funnel["stage"] == "No grip files (entire subject×task)", "n_trials"
+    ].iloc[0]
+    partial = funnel.loc[
+        funnel["stage"] == "Partial grip (behavioral > on-disk grip)", "n_trials"
+    ].iloc[0]
+    analysis = funnel.loc[
         funnel["stage"] == "Analysis set (trial features extracted)", "n_trials"
-    ].iloc[0] == 190
+    ].iloc[0]
+    assert no_grip == 80
+    assert partial == 120
+    assert analysis == 218
 
 
 def test_summarize_join_trial_counts_merges_runs():

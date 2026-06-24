@@ -120,17 +120,23 @@ Prior work treats grip as a binary effort covariate. We treat the 100 Hz stream 
 
 attrition %>%
   gt() %>%
-  tab_header(title = "Grip analysis attrition funnel") %>%
+  tab_header(
+    title = "Grip analysis attrition funnel",
+    subtitle = "Trial counts at each stage; % of retainable behavioral trials in final column"
+  ) %>%
   cols_label(
     stage = "Stage",
     n_subject_tasks = "Subject-tasks",
     n_trials = "Trials",
+    pct_of_retainable_beh = "% retainable beh",
     note = "Note"
   ) %>%
+  fmt_number(columns = pct_of_retainable_beh, decimals = 1, pattern = "{x}%") %>%
+  sub_missing(columns = pct_of_retainable_beh, missing_text = "—") %>%
   tab_options(table.font.size = px(13))
 ```
 
-**Analysis set:** `r format(n_trials, big.mark = ",")` trials · `r n_subjects` subjects · aud + vis oddball only.
+**Analysis set:** `r format(n_trials, big.mark = ",")` trials in behavioral v3 · **`r format(sum(attrition$n_trials[attrition$stage == "Analysis set (trial features extracted)"]), big.mark = ",")` trials with grip features** (`r sprintf("%.0f%%", attrition$pct_of_retainable_beh[attrition$stage == "Analysis set (trial features extracted)"])` of retainable behavioral) · `r n_subjects` subjects · aud + vis oddball only.
 
 ---
 
@@ -282,7 +288,7 @@ model_tbl %>%
 ## 7. Limitations & next steps
 
 1. **Whole-epoch features** — spectral summaries integrate the full ~2.94 s trial; probe-locked post-stimulus windows would tighten the cognitive-shock claim.
-2. **Missing grip files** — ~61 subject-tasks lack on-disk gripforce; file attrition, not participant failure.
+2. **File attrition** — ~50% of retainable behavioral trials come from subject×task blocks with **no grip CSVs**; another ~28% have **partial grip** (often one run ≈ 30 trials vs ~150 behavioral). Only ~21% reach the analysis set.
 3. **Grip stratification required** — pooled tremor effects flip sign across grip conditions; primary inference is high-grip only.
 4. **Auditory probe timing** — `probe_onset_s = 0` for aud; visual trials have sub-second probe offsets.
 

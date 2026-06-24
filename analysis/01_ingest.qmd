@@ -254,7 +254,7 @@ trial_features.head(10)
 
 ## Grip analysis cohort & attrition log
 
-Primary modeling cohort: subject-tasks with gripforce on disk and extracted features (`analysis_ready`). Save the coverage table and stage counts for a CONSORT-style figure in the paper.
+Primary modeling cohort: subject-tasks with gripforce on disk and extracted features (`analysis_ready`). The attrition funnel separates **whole subject×task blocks with no grip files** from **partial grip coverage** (behavioral trials exceed on-disk grip trials).
 
 ```{python}
 #| label: grip-cohort
