@@ -1,0 +1,8 @@
+feature,feature_label,mean_abs_shap,pct_importance
+log_rms,RMS tracking error,0.005822771630244255,2.218750382152147
+log_tracking,"Visuomotor tracking
+(0.5–3 Hz)",0.00763914006036716,2.9108723481814476
+is_high,Grip condition (High=1),0.007988029754216098,3.043815762540256
+log_tremor,"Physiological tremor
+(8–12 Hz)",0.008966244732114857,3.4165617663104193
+stim_level_index,Task difficulty,0.232018546323082,88.40999974081573

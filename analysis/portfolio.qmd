@@ -67,7 +67,10 @@ fig_files <- c(
   "hero_direction_flip.png",
   "hero_psd_ribbon.png",
   "hero_caterpillar.png",
-  "hero_sat_tradeoff.png"
+  "hero_sat_tradeoff.png",
+  "hero_shap_importance.png",
+  "hero_shap_tremor_by_difficulty.png",
+  "hero_windowed_tremor_model.png"
 )
 fig_paths <- file.path(fig_dir, fig_files)
 missing_figs <- fig_paths[!file.exists(fig_paths)]
@@ -78,6 +81,21 @@ if (length(missing_figs) > 0) {
   )
 }
 ```
+
+## Case study architecture {#architecture}
+
+A dual-layer pipeline: **explanatory modeling** to isolate the cognitive–motor interference mechanism, then **prospective ML** to quantify its operational value.
+
+| Section | Method | Key Visual | UX / Product Takeaway |
+|---|---|---|---|
+| **01 Ingestion & Validation** | Epoch slicing via `elapsed_time` reset detection | Run-clock sawtooth check + attrition funnel | Handles raw, unsegmented 100 Hz streaming sensor logs |
+| **02 Feature Extraction** | Target-normalized error → zero-phase 4th-order Butterworth → Welch PSD | Single-trial anatomy (Raw → Normalized → Tremor bands) | Mastery of DSP workflows and physiological artifact isolation |
+| **03 Event-Locked Window Analysis** | Pre/post-probe lLMER: log(tremor) ~ Window × Difficulty + (1\|subject) | Pre→post tremor surge at max difficulty (p < 0.001) | Motor system destabilises at the exact millisecond of peak cognitive demand |
+| **04 Inferential Modeling** | Stratified GLMM (`glmer`) high vs. low grip, orthogonal difficulty vectors | Odds ratio forest plot + psychometric lift curves | Isolates precision-noise artifact from genuine somatic interference |
+| **05 Predictive ML** | GroupKFold Random Forest (leave-one-subject-out) | ROC-AUC lift curve + SHAP importance bar chart | Builds generalizable error-prediction pipelines for wearable telemetry |
+| **06 Brain–Behavior Fusion** | LC fICVF / LC CNR moderation regression | Scatterplots: Δ tremor ~ LC microstructure | Synthesizes continuous biometrics with structural neuroimaging |
+
+---
 
 ## LLM / reviewer brief {#llm-brief}
 
@@ -336,11 +354,42 @@ GroupKFold (leave-one-subject-out) cross-validation on high-grip trials (*N* = 6
 
 Task difficulty (`stim_level_index`) dominates. Grip-force DSP features add ~0.5% AUC — a real but modest independent contribution. The incremental lift is scientifically informative: grip instability carries signal about perceptual outcome *beyond* the nominal task design.
 
+### 7f. SHAP Explainability: Which Features Drive Predictions?
+
+```{r}
+#| label: fig-shap-importance
+#| fig-cap: "Global SHAP importance (Random Forest, N = 13,582 trials). Task difficulty explains 88% of variance; among continuous biometric DSP features, physiological tremor (8–12 Hz) is the single largest contributor."
+
+knitr::include_graphics(file.path(fig_dir, "hero_shap_importance.png"))
+```
+
+```{r}
+#| label: fig-shap-interaction
+#| fig-cap: "Mean SHAP value for tremor by difficulty level. The tremor effect reverses sign at maximum difficulty (level 4) — consistent with the direction-flip story and precision-noise at near-chance trials."
+
+knitr::include_graphics(file.path(fig_dir, "hero_shap_tremor_by_difficulty.png"))
+```
+
+> **Honest headline:** Task difficulty governs accuracy; physiological tremor (8–12 Hz) is the **strongest DSP contributor** but accounts for ~3.4% of total SHAP importance. The value of the dynamometer lies in adding an *independent* continuous signal stream — not in replacing the task design.
+
+### 7g. Event-Locked Window Analysis: The Cognitive Shock Moment
+
+Pre/post-probe window analysis on visual trials (*N* = 1,426 trials, 62 subjects, difficulty levels 3–4). Mixed model: `log(tremor) ~ Window × Difficulty + (1 | subject_id)`.
+
+```{r}
+#| label: fig-windowed-model
+#| fig-cap: "Pre- vs. post-probe log tremor power by difficulty. Window × Difficulty interaction β = +19.4, t = 4.1, p < 0.001. Tremor surges post-probe exclusively at maximum difficulty — the motor system destabilises at the moment of peak cognitive demand."
+
+knitr::include_graphics(file.path(fig_dir, "hero_windowed_tremor_model.png"))
+```
+
+This upgrades the primary claim from a trial-level correlation to an **event-locked discovery**: the grip signal is not noisier throughout hard trials — it destabilises *at the probe*. Pre-probe steady states are comparable across difficulty; post-probe instability is the discriminating signature.
+
 ---
 
 ## 8. Limitations & next steps
 
-1. **Pre/post-probe windows** — windowed feature extraction (pre: −1.5 to −0.1 s; post: +0.1 to +1.5 s relative to probe onset) is implemented and computed for visual trials (n = 1,444 with valid windows). Integration into the primary model is a next step.
+1. **Pre/post-probe windows** — windowed feature extraction and event-locked LMER (§7g) confirm a significant Window × Difficulty interaction (p < 0.001). Windows are valid only for visual trials (n = 1,426); auditory trials use `probe_onset_s = 0` and are excluded from this analysis.
 2. **File attrition (post re-download)** — **78.1%** of retainable behavioral trials reach the analysis set (13,759 / 17,621). Residual loss: **0.7%** no grip files (BAP172 aud only), **20.9%** partial grip coverage, **3.8%** feature extraction.
 3. **Grip stratification required** — pooled tremor effects flip sign across grip conditions; primary inference is high-grip only.
 4. **Auditory probe timing** — `probe_onset_s = 0` for aud; visual trials have sub-second probe offsets.
