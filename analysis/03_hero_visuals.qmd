@@ -640,7 +640,11 @@ viz_dat <- model_tbl %>%
     ),
     subject_id = factor(subject_id),
     tremor_z = as.numeric(scale(pow_8_12hz))
-  )
+  ) %>%
+  # Exclude spectral outliers (|z| > 3.5): extreme values indicate recording artifacts
+  # that bypassed behavioral cleaning. These 28 high-grip trials (max z ≈ 48.5) have
+  # large leverage and are not plausible physiological tremor values.
+  filter(abs(tremor_z) <= 3.5)
 
 glmer_ctrl <- glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 2e5))
 
@@ -666,18 +670,19 @@ pred_grid$task_modality <- factor(pred_grid$task_modality, levels = levels(viz_d
 
 pred_grid$pred_acc <- predict(m_lift, newdata = pred_grid, type = "response", re.form = NA)
 
-# Empirical bins for overlay
+# Empirical bins for overlay — use -Inf/Inf for outer edges so no trial lands in <NA>
 viz_bins <- viz_dat %>%
   mutate(tremor_bin = cut(
     tremor_z,
-    breaks = seq(-2.5, 2.5, by = 1),
+    breaks = c(-Inf, -1.5, -0.5, 0.5, 1.5, Inf),
     labels = c("< −1.5", "−1.5 to −0.5", "−0.5 to 0.5", "0.5 to 1.5", "> 1.5")
   )) %>%
   group_by(grip_effort, tremor_bin) %>%
   summarise(
     acc = mean(resp_is_correct),
     se = sqrt(acc * (1 - acc) / n()),
-    tremor_mid = mean(tremor_z),
+    # Cap display midpoint at ±2.5 so extreme-bin labels stay within the plot range
+    tremor_mid = pmin(pmax(mean(tremor_z), -2.5), 2.5),
     n = n(),
     .groups = "drop"
   ) %>%
@@ -714,14 +719,14 @@ fig_lift <- ggplot() +
     expand = expansion(mult = c(0.02, 0.02))
   ) +
   labs(
-    title = "High-Frequency Motor Instability Predicts Perceptual Errors Under Physical Load",
+    title = "Tremor-Band Power and Perceptual Accuracy by Grip Effort",
     subtitle = "Marginal accuracy from mixed-effects model (modality + difficulty adjusted; population-level predictions)",
-    x = "Physiological tremor power, 8–12 Hz (within-subject z-score)",
-    y = "Predicted perceptual accuracy",
+    x = "Physiological tremor power, 8–12 Hz (within-condition z-score)",
+    y = "Predicted accuracy",
     caption = paste0(
       "Lines: fixed-effects predictions from tremor × grip interaction model (n = ",
       format(nrow(viz_dat), big.mark = ","),
-      " trials). Points: binned observed accuracy ± 95% CI (bins with n ≥ 25)."
+      " trials; spectral outliers |z| > 3.5 excluded). Points: binned observed accuracy ± 95% CI (n ≥ 25 per bin)."
     )
   ) +
   theme_hero() +
@@ -1259,10 +1264,11 @@ This scatter shows per-subject median RT vs. accuracy for each grip condition
 #| label: visual-sat
 #| fig-height: 5.5
 
-m$resp_rt_ms <- m$same_diff_resp_secs * 1000
-m <- m[!is.na(m$resp_rt_ms) & m$resp_rt_ms > 100 & m$resp_rt_ms < 5000, ]
+sat_dat <- model_tbl
+sat_dat$resp_rt_ms <- sat_dat$same_diff_resp_secs * 1000
+sat_dat <- sat_dat[!is.na(sat_dat$resp_rt_ms) & sat_dat$resp_rt_ms > 100 & sat_dat$resp_rt_ms < 5000, ]
 
-sat <- m |>
+sat <- sat_dat |>
   mutate(grip_label = ifelse(is_high_grip %in% c(TRUE,"True","TRUE",1), "High (40% MVC)", "Low (5% MVC)")) |>
   group_by(subject_id, grip_label) |>
   summarise(
