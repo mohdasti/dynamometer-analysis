@@ -32,3 +32,5 @@ reports/cognitive_motor_glmer_fixed_effects.csv
 reports/grip_attrition_funnel.csv
 reports/trial_coverage.csv
 reports/figures/
+
+**/*.quarto_ipynb

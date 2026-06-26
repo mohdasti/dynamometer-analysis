@@ -349,9 +349,10 @@ p_psd <- ggplot(hero_psd_log, aes(x = freq_hz, y = psd_log10)) +
 fig_anatomy <- (p_force / p_error / p_instability) | p_psd +
   plot_layout(widths = c(1.2, 1)) +
   plot_annotation(
-    title = "The Signal Chain: From Grip Force to Spectral Phenotype",
+    title = "Representative Trial: From Grip Force to Spectral Decomposition",
     subtitle = paste0(
       trace_label,
+      " (representative trial; not inferential).",
       "<br>Time panels: probe onset at *t* = ",
       format(hero_onset, nsmall = 2),
       " s (orange band). **D**: Welch PSD after target-normalization, detrend, and 0.5 Hz zero-phase high-pass."
@@ -458,11 +459,12 @@ p_specgram <- ggplot(hero_spec, aes(x = time_from_probe_s, y = freq_hz, fill = p
 fig_specgram <- p_probe_error / p_specgram +
   plot_layout(heights = c(1, 2.4)) +
   plot_annotation(
-    title = "The Cognitive Shock: Probe-Locked Motor Spectrogram",
+    title = "Representative Probe-Locked Force Trace and Short-Time Spectrum",
     subtitle = paste0(
       trace_label,
-      "<br>**A** = normalized error; **B** = short-time spectrum. Vertical gold line = oddball probe (*t* = 0). ",
-      "Grey shading = pre-probe baseline. Green band = tracking (0.5–3 Hz); pink band = tremor (8–12 Hz)."
+      "<br>**A** = normalized force error; **B** = short-time spectrum (representative trial; not inferential). ",
+      "Vertical gold line = oddball probe onset (*t* = 0). ",
+      "Green band = tracking (0.5–3 Hz); pink band = tremor (8–12 Hz)."
     ),
     theme = theme(
       plot.title = element_markdown(face = "bold", size = 16, hjust = 0),
@@ -555,11 +557,11 @@ p_spec_violin <- ggplot(spec_long, aes(x = outcome, y = log_power, fill = outcom
   scale_fill_manual(values = c("Correct" = "#009E73", "Incorrect" = "#D55E00")) +
   scale_y_continuous(limits = c(-7, 0), breaks = seq(-6, 0, 2)) +
   labs(
-    title = "Spectral Phenotype of Cognitive–Motor Interference",
+    title = "Trial-Level Band Power by Grip Condition and Perceptual Outcome",
     subtitle = paste0(
-      "Trial-level band power across the analysis cohort (n = ",
+      "Analysis cohort (n = ",
       format(nrow(spec_dat), big.mark = ","),
-      " trials with non-zero band power)"
+      " trials with non-zero band power); distributions are descriptive, not inferential"
     ),
     x = NULL,
     y = expression(log[10] ~ "band power"),
@@ -764,7 +766,7 @@ ggsave(
 
 ## Visual 5 — Grip compliance portrait
 
-High-grip (40% MVC) trials are valid for load-normalized spectral analysis only if participants actually *held* the target force. This figure shows per-subject force compliance (actual / target). BAP196 (negative MVC) is already excluded by NaN spectral features.
+High-grip (40% MVC) trials are valid for load-normalized spectral analysis only if participants actually *held* the target force. This figure shows per-subject force compliance (actual / target). One participant with a negative MVC recording is already excluded by NaN spectral features.
 
 ```{r}
 #| label: visual-compliance-data
@@ -833,7 +835,7 @@ p_compliance <- ggplot(compliance_dat, aes(x = subject_rank, y = mean_compliance
     ),
     x = "Participants (ranked by compliance)",
     y = "Force compliance (actual / target)",
-    caption = "All subjects within ±20% of target. BAP196 excluded (negative MVC value — data entry error)."
+    caption = "All subjects within ±20% of target. One participant excluded due to a negative MVC recording (data entry error)."
   ) +
   theme_hero()
 
@@ -1170,11 +1172,11 @@ p_psd <- ggplot(psd_profile, aes(x = freq_hz, y = mean_psd, colour = Grip, fill 
 
 p_psd_annotated <- p_psd +
   plot_annotation(
-    title = "Population Spectral Profile: Low Grip Amplifies Physiological Tremor",
+    title = "Grip Level Reshapes Target-Normalized Force Spectra",
     subtitle = paste0(
       "Grand-average Welch PSD ± SE across all subjects (*N* = 65). ",
       "Shaded bands mark visuomotor tracking (0.5–3 Hz) and physiological tremor (8–12 Hz) windows.<br>",
-      "High-grip (40% MVC) **suppresses** tremor-band power; low-grip (5% MVC) leaves it uncontrolled."
+      "High-grip (40% MVC) shows lower tremor-band power; low-grip (5% MVC) shows higher tremor-band power."
     ),
     theme = theme(
       plot.title    = element_markdown(face = "bold", size = 14),
@@ -1230,14 +1232,17 @@ p_cat <- ggplot(subj_sum[!is.na(subj_sum$load_cost),],
   theme(legend.position = c(0.15, 0.85),
         axis.text.x = element_blank(), axis.ticks.x = element_blank())
 
+pct_hindered_cat <- round(100 * mean(subj_sum$load_cost[!is.na(subj_sum$load_cost)] > 0))
+pct_facilitated_cat <- 100 - pct_hindered_cat
+
 p_cat_annotated <- p_cat +
   plot_annotation(
     title = "Substantial Individual Differences in Cognitive Load Cost",
     subtitle = paste0(
       "Each stem = one subject; positive = accuracy *drops* under high grip, ",
       "negative = accuracy *improves*.<br>",
-      "~70% of subjects show a detectable load cost; ~30% are facilitated, ",
-      "consistent with inverted-U arousal theory."
+      pct_hindered_cat, "% of subjects show a detectable load cost; ",
+      pct_facilitated_cat, "% are facilitated or unaffected."
     ),
     theme = theme(
       plot.title    = element_markdown(face = "bold", size = 14),
@@ -1309,12 +1314,12 @@ p_sat <- ggplot(sat_paired, aes(x = med_rt, y = acc, colour = grip_label, group 
 
 p_sat_annotated <- p_sat +
   plot_annotation(
-    title = "Physical Load Degrades Accuracy Without Buying Speed",
+    title = "Load-Related Accuracy Differences Were Not Explained by Faster Responses",
     subtitle = paste0(
       "Each line connects one subject's SAT point under low (blue) vs. high (red) grip. ",
       "Diamond markers = grand mean ± SE.<br>",
       "High grip shifts the cloud *down* (lower accuracy) with little systematic change in RT, ",
-      "ruling out a pure speed–accuracy swap."
+      "arguing against a pure speed–accuracy trade-off."
     ),
     theme = theme(
       plot.title    = element_markdown(face = "bold", size = 14),

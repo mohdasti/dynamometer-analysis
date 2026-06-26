@@ -101,11 +101,15 @@ knitr::kable(funnel_out, align = c("l", "r", "r", "r", "l"))
 
 **Manipulation checks and individual differences.**
 
-![Per-subject high-grip force compliance (actual / target).](figures/hero_grip_compliance.png){#fig-supp-compliance width=85%}
+![Per-subject high-grip force compliance (actual / target). All participants maintained force within ±20% of the 40% MVC target. One participant with a negative MVC recording was excluded from all spectral analyses.](figures/hero_grip_compliance.png){#fig-supp-compliance width=85%}
 
-![Subject-level accuracy drop under high versus low grip (caterpillar plot).](figures/hero_caterpillar.png){#fig-supp-caterpillar width=90%}
+![Subject-level accuracy drop under high versus low grip. High grip produced lower accuracy for the majority of participants.](figures/hero_caterpillar.png){#fig-supp-caterpillar width=90%}
 
-![Speed–accuracy trade-off under low versus high grip.](figures/hero_sat_tradeoff.png){#fig-supp-sat width=85%}
+![Speed–accuracy trade-off under low versus high grip. Load-related accuracy differences were not accompanied by systematically faster responses.](figures/hero_sat_tradeoff.png){#fig-supp-sat width=85%}
+
+**Tremor-band power and perceptual accuracy.**
+
+![Marginal perceptual accuracy by tremor-band power quantile, split by grip effort. Lines show model-predicted values; points show binned observed accuracy ± 95% CI. Both conditions show a negative association. Shown for visualization; the tremor × grip interaction was not significant (*p* = .244).](figures/hero_tremor_accuracy_lift.png){#fig-supp-tremor-lift width=85%}
 
 **Predictive modeling and brain–behavior.**
 
