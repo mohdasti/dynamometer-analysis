@@ -71,21 +71,17 @@ model_path <- file.path(repo, "reports", "analysis_trial_table.csv")
 fig_dir <- file.path(repo, "reports", "figures")
 dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
 
+source(file.path(repo, "R", "colors_manuscript.R"))
+okabe <- grip_level_colors[c("Low effort", "High effort")]
+grip_colors <- grip_level_colors[c("Low grip (5% MVC)", "High grip (40% MVC)")]
+flip_colors <- grip_level_colors[c("Low grip\n(5% MVC)", "High grip\n(40% MVC)")]
+grip_scale_colors <- grip_level_colors[c("Low (5% MVC)", "High (40% MVC)")]
+
 fs_hz <- 100
 trial_epoch_s <- 2.94
 probe_window_s <- 0.15
 tracking_band <- c(0.5, 3.0)
 tremor_band <- c(8.0, 12.0)
-
-band_colors <- c(
-  "Tracking\n0.5–3 Hz" = "#009E73",
-  "Tremor\n8–12 Hz" = "#CC79A7"
-)
-
-okabe <- c(
-  "Low effort" = "#0072B2",
-  "High effort" = "#D55E00"
-)
 
 theme_hero <- function(base_size = 12) {
   theme_minimal(base_size = base_size) +
@@ -118,7 +114,7 @@ probe_rect <- function(stim_onset_s, width_s = probe_window_s) {
     xmax = stim_onset_s + width_s,
     ymin = -Inf,
     ymax = Inf,
-    fill = "#FFB000",
+    fill = signal_colors["probe_marker"],
     alpha = 0.18
   )
 }
@@ -290,11 +286,11 @@ trace_probe <- trace %>%
 #| fig-cap: "Single-trial signal chain: time domain (A–C) and Welch PSD (D) with DSP bands highlighted."
 
 p_force <- ggplot(trace, aes(x = t_rel_s, y = grip_force_au)) +
-  geom_line(color = "#0072B2", linewidth = 0.75) +
+  geom_line(color = signal_colors["force"], linewidth = 0.75) +
   geom_hline(
     yintercept = hero_meta$grip_targ_prop_mvc * hero_meta$mvc,
     linetype = "dashed",
-    color = "#999999",
+    color = reference_line_color,
     linewidth = 0.45
   ) +
   probe_rect(hero_onset) +
@@ -304,8 +300,8 @@ p_force <- ggplot(trace, aes(x = t_rel_s, y = grip_force_au)) +
   theme_hero()
 
 p_error <- ggplot(trace, aes(x = t_rel_s, y = normalized_error)) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "#666666", linewidth = 0.45) +
-  geom_line(color = "#009E73", linewidth = 0.75) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = reference_line_color, linewidth = 0.45) +
+  geom_line(color = signal_colors["error"], linewidth = 0.75) +
   probe_rect(hero_onset) +
   panel_tag("B") +
   scale_x_continuous(limits = c(0, trial_epoch_s), expand = c(0, 0)) +
@@ -313,7 +309,7 @@ p_error <- ggplot(trace, aes(x = t_rel_s, y = normalized_error)) +
   theme_hero()
 
 p_instability <- ggplot(trace, aes(x = t_rel_s, y = rolling_var)) +
-  geom_line(color = "#D55E00", linewidth = 0.8) +
+  geom_line(color = signal_colors["instability"], linewidth = 0.8) +
   probe_rect(hero_onset) +
   panel_tag("C") +
   scale_x_continuous(limits = c(0, trial_epoch_s), expand = c(0, 0)) +
@@ -325,7 +321,7 @@ p_psd <- ggplot(hero_psd_log, aes(x = freq_hz, y = psd_log10)) +
   band_rect(tracking_band[1], tracking_band[2], band_colors[[1]]) +
   band_rect(tremor_band[1], tremor_band[2], band_colors[[2]]) +
   geom_vline(xintercept = c(tracking_band, tremor_band), color = "grey70", linewidth = 0.3, linetype = "dotted") +
-  geom_line(color = "#332288", linewidth = 0.85) +
+  geom_line(color = signal_colors["psd"], linewidth = 0.85) +
   panel_tag("D") +
   scale_x_continuous(limits = c(0, 20), breaks = seq(0, 20, 5), expand = c(0, 0)) +
   labs(
@@ -418,13 +414,13 @@ Time–frequency power aligned so **probe onset = 0 s**. Pre-probe window shaded
 #| label: visual-4-specgram
 #| fig-cap: "Probe-locked spectrogram with normalized error aligned to oddball onset."
 
-pre_probe_fill <- "#404040"
+pre_probe_fill <- signal_colors["pre_epoch"]
 
 p_probe_error <- ggplot(trace_probe, aes(x = t_from_probe, y = normalized_error)) +
   annotate("rect", xmin = -Inf, xmax = 0, ymin = -Inf, ymax = Inf, fill = pre_probe_fill, alpha = 0.07) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "grey55", linewidth = 0.4) +
-  geom_vline(xintercept = 0, color = "#FFB000", linewidth = 0.85) +
-  geom_line(color = "#009E73", linewidth = 0.8) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = reference_line_color, linewidth = 0.4) +
+  geom_vline(xintercept = 0, color = signal_colors["probe_marker"], linewidth = 0.85) +
+  geom_line(color = signal_colors["error"], linewidth = 0.8) +
   panel_tag("A") +
   scale_x_continuous(limits = c(-0.25, 2.4), expand = c(0, 0)) +
   labs(x = NULL, y = "Normalized error") +
@@ -558,7 +554,7 @@ p_spec_violin <- ggplot(spec_long, aes(x = outcome, y = log_power, fill = outcom
   geom_violin(trim = FALSE, alpha = 0.35, color = NA) +
   geom_boxplot(width = 0.14, outlier.size = 0.4, alpha = 0.85, color = "grey25") +
   facet_grid(band ~ grip_effort, scales = "free_y") +
-  scale_fill_manual(values = c("Correct" = "#009E73", "Incorrect" = "#D55E00")) +
+  scale_fill_manual(values = outcome_colors) +
   scale_y_continuous(limits = c(-7, 0), breaks = seq(-6, 0, 2)) +
   labs(
     title = "Trial-Level Band Power by Grip Condition and Perceptual Outcome",
@@ -585,7 +581,7 @@ p_spec_scatter <- ggplot(spec_dat, aes(x = log_tracking, y = log_tremor, color =
   geom_point(alpha = 0.25, size = 1.2) +
   geom_density2d(color = "grey55", linewidth = 0.4, bins = 5) +
   facet_wrap(~ grip_effort) +
-  scale_color_manual(values = c("Correct" = "#009E73", "Incorrect" = "#D55E00")) +
+  scale_color_manual(values = outcome_colors) +
   scale_x_continuous(limits = c(-5, 0)) +
   scale_y_continuous(limits = c(-6, -2)) +
   labs(
@@ -809,20 +805,20 @@ n_subj       <- nrow(compliance_dat)
 
 p_compliance <- ggplot(compliance_dat, aes(x = subject_rank, y = mean_compliance)) +
   geom_hline(yintercept = 1.0, linetype = "dashed", color = "grey60", linewidth = 0.5) +
-  geom_hline(yintercept = c(0.8, 1.2), linetype = "dotted", color = "#D55E00", linewidth = 0.4) +
+  geom_hline(yintercept = c(0.8, 1.2), linetype = "dotted", color = effort_colors["High"], linewidth = 0.4) +
   geom_errorbar(
     aes(ymin = mean_compliance - sd_compliance, ymax = mean_compliance + sd_compliance),
     width = 0.3, color = "grey70", linewidth = 0.4
   ) +
   geom_point(aes(color = mean_compliance), size = 2.8) +
-  geom_hline(yintercept = overall_mean, color = "#0072B2", linewidth = 0.7, linetype = "solid") +
+  geom_hline(yintercept = overall_mean, color = effort_colors["Low"], linewidth = 0.7, linetype = "solid") +
   annotate(
     "text", x = n_subj * 0.85, y = overall_mean + 0.02,
     label = sprintf("Mean = %.2f×", overall_mean),
-    color = "#0072B2", size = 3.5, hjust = 0.5
+    color = effort_colors["Low"], size = 3.5, hjust = 0.5
   ) +
   scale_color_gradient2(
-    low = "#D55E00", mid = "#999999", high = "#009E73",
+    low = effort_colors["High"], mid = reference_line_color, high = task_colors["ADT"],
     midpoint = 1.0,
     guide = "none"
   ) +
@@ -887,8 +883,6 @@ psycho_dat <- model_tbl %>%
 #| label: visual-psychometric
 #| fig-height: 5
 #| fig-cap: "Psychometric function: P('Different') rises monotonically with stimulus level; physical load compresses the curve."
-
-grip_colors <- c("Low grip (5% MVC)" = "#0072B2", "High grip (40% MVC)" = "#D55E00")
 
 p_psycho <- ggplot(psycho_dat, aes(
     x = stim_level, y = pd,
@@ -1043,8 +1037,6 @@ flip_bins <- rbind(
   bin_flip(flip_low,  "Low grip\n(5% MVC)")
 ) %>%
   mutate(label = factor(label, levels = c("High grip\n(40% MVC)", "Low grip\n(5% MVC)")))
-
-flip_colors <- c("High grip\n(40% MVC)" = "#D55E00", "Low grip\n(5% MVC)" = "#0072B2")
 ```
 
 ```{r}
@@ -1052,13 +1044,17 @@ flip_colors <- c("High grip\n(40% MVC)" = "#D55E00", "Low grip\n(5% MVC)" = "#00
 #| fig-height: 5.5
 #| fig-cap: "Tremor → accuracy slope for high vs low grip: opposite directions, same feature."
 
-# OR forest plot inset
+# OR forest plot inset — axis limits from data (include OR=1 reference and full CIs)
+or_xlim <- range(c(tremor_or$OR_low, tremor_or$OR_high, tremor_or$OR, 1), na.rm = TRUE)
+or_xlim <- or_xlim + c(-1, 1) * 0.12 * diff(or_xlim)
+
 p_or <- ggplot(tremor_or, aes(x = OR, xmin = OR_low, xmax = OR_high, y = Condition, color = Condition)) +
   geom_vline(xintercept = 1, linetype = "dashed", color = "grey55", linewidth = 0.5) +
   geom_errorbarh(height = 0.2, linewidth = 0.8) +
   geom_point(size = 4) +
   scale_color_manual(values = flip_colors, guide = "none") +
-  scale_x_continuous(limits = c(0.7, 1.5), breaks = c(0.8, 1.0, 1.2, 1.4)) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 4)) +
+  coord_cartesian(xlim = or_xlim) +
   labs(
     title = "OR: Tremor → Accuracy",
     x = "Odds ratio (95% Wald CI)",
@@ -1156,14 +1152,14 @@ band_df <- data.frame(
 p_psd <- ggplot(psd_profile, aes(x = freq_hz, y = mean_psd, colour = Grip, fill = Grip)) +
   geom_rect(data = band_df, inherit.aes = FALSE,
             aes(xmin = xmin, xmax = xmax, ymin = -Inf, ymax = Inf),
-            alpha = 0.08, fill = c("#4477AA","#EE6677")) +
+            alpha = 0.08, fill = c(band_colors[[1]], band_colors[[2]])) +
   geom_ribbon(aes(ymin = mean_psd - se_psd, ymax = mean_psd + se_psd), alpha = 0.25, colour = NA) +
   geom_line(linewidth = 1.1) +
   geom_text(data = band_df, inherit.aes = FALSE,
             aes(x = (xmin + xmax) / 2, y = Inf, label = label),
             vjust = 1.4, size = 3, colour = "grey30") +
-  scale_colour_manual(values = c("High (40% MVC)" = "#E06C75","Low (5% MVC)" = "#61AFEF")) +
-  scale_fill_manual(  values = c("High (40% MVC)" = "#E06C75","Low (5% MVC)" = "#61AFEF")) +
+  scale_colour_manual(values = grip_scale_colors) +
+  scale_fill_manual(values = grip_scale_colors) +
   scale_y_log10(labels = scales::label_scientific()) +
   scale_x_continuous(breaks = c(0, 2, 4, 6, 8, 10, 12, 15, 20)) +
   labs(
@@ -1225,8 +1221,7 @@ p_cat <- ggplot(subj_sum[!is.na(subj_sum$load_cost),],
   geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
   geom_segment(aes(xend = subject_ord, yend = 0), linewidth = 0.6, alpha = 0.5) +
   geom_point(size = 2.8) +
-  scale_colour_manual(values = c("Hindered" = "#E06C75", "Facilitated" = "#61AFEF"),
-                      name = "Load effect") +
+  scale_colour_manual(values = load_effect_colors, name = "Load effect") +
   scale_y_continuous(labels = scales::label_percent(accuracy = 1)) +
   labs(
     x = "Subject (ranked by load cost)",
@@ -1306,8 +1301,7 @@ p_sat <- ggplot(sat_paired, aes(x = med_rt, y = acc, colour = grip_label, group 
                size = 5, shape = 18, show.legend = FALSE) +
   stat_summary(aes(group = grip_label), fun.data = mean_se, geom = "errorbar",
                width = 20, linewidth = 1.1, show.legend = FALSE) +
-  scale_colour_manual(values = c("High (40% MVC)" = "#E06C75","Low (5% MVC)" = "#61AFEF"),
-                      name = "Grip effort") +
+  scale_colour_manual(values = grip_scale_colors, name = "Grip effort") +
   scale_y_continuous(labels = label_percent(accuracy = 1), limits = c(0.35, 1.0)) +
   labs(
     x = "Median response time (ms)",
@@ -1320,7 +1314,7 @@ p_sat_annotated <- p_sat +
   plot_annotation(
     title = "Load-Related Accuracy Differences Were Not Explained by Faster Responses",
     subtitle = paste0(
-      "Each line connects one subject's SAT point under low (blue) vs. high (red) grip. ",
+      "Each line connects one subject's SAT point under low (light blue) vs. high (magenta) grip. ",
       "Diamond markers = grand mean ± SE.<br>",
       "High grip shifts the cloud *down* (lower accuracy) with little systematic change in RT, ",
       "arguing against a pure speed–accuracy trade-off."

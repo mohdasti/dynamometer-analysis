@@ -52,6 +52,8 @@ if (!file.exists(file.path(repo, "reports", "analysis_trial_table.csv"))) {
   repo <- normalizePath(".", winslash = "/", mustWork = TRUE)
 }
 
+source(file.path(repo, "R", "colors_manuscript.R"))
+
 theme_hero <- function(base_size = 12) {
   theme_minimal(base_size = base_size) +
     theme(
@@ -305,8 +307,8 @@ cat(sprintf("Subjects with delta_tremor + LC metrics: %d\n", nrow(lc_clean)))
 # Scatter: delta_tremor ~ LC_CNR_mean
 p_lc1 <- ggplot(lc_clean[!is.na(lc_clean$LC_CNR_mean),],
                 aes(x = LC_CNR_mean, y = delta_tremor)) +
-  geom_point(colour = "#E06C75", alpha = 0.75, size = 2.5) +
-  geom_smooth(method = "lm", colour = "grey30", linewidth = 0.9, se = TRUE) +
+  geom_point(colour = lc_scatter_colors["LC_CNR"], alpha = 0.75, size = 2.5) +
+  geom_smooth(method = "lm", colour = reference_line_color, linewidth = 0.9, se = TRUE) +
   labs(
     x = "LC CNR (magnetization transfer contrast)",
     y = "Δ Log tremor power (high − low grip)"
@@ -316,8 +318,8 @@ p_lc1 <- ggplot(lc_clean[!is.na(lc_clean$LC_CNR_mean),],
 # Scatter: delta_tremor ~ LC_fICVF
 p_lc2 <- ggplot(lc_clean[!is.na(lc_clean$LC_fICVF),],
                 aes(x = LC_fICVF, y = delta_tremor)) +
-  geom_point(colour = "#61AFEF", alpha = 0.75, size = 2.5) +
-  geom_smooth(method = "lm", colour = "grey30", linewidth = 0.9, se = TRUE) +
+  geom_point(colour = lc_scatter_colors["LC_fICVF"], alpha = 0.75, size = 2.5) +
+  geom_smooth(method = "lm", colour = reference_line_color, linewidth = 0.9, se = TRUE) +
   labs(
     x = "LC fICVF (NODDI restricted diffusion)",
     y = "Δ Log tremor power (high − low grip)"
@@ -334,7 +336,7 @@ cat(sprintf(
   r_cnr, r_ficvf, r_ad
 ))
 
-(p_lc1 + p_lc2) +
+p_lc_bb <- (p_lc1 + p_lc2) +
   plot_annotation(
     title = "LC Microstructure and Tremor Reactivity to Physical Load",
     subtitle = sprintf(
@@ -348,6 +350,8 @@ cat(sprintf(
       plot.subtitle = element_markdown(size = 10, colour = "grey35")
     )
   )
+
+p_lc_bb
 ```
 
 ```{r}
@@ -359,8 +363,8 @@ lc_acc <- subj_sum[!is.na(subj_sum$load_cost) & !is.na(subj_sum$LC_fICVF), ]
 r_lc_cost <- cor(lc_acc$load_cost, lc_acc$LC_fICVF, use = "pairwise.complete.obs")
 
 ggplot(lc_acc, aes(x = LC_fICVF, y = load_cost)) +
-  geom_point(colour = "#98C379", alpha = 0.75, size = 2.5) +
-  geom_smooth(method = "lm", colour = "grey30", linewidth = 0.9, se = TRUE) +
+  geom_point(colour = lc_scatter_colors["LC_cost"], alpha = 0.75, size = 2.5) +
+  geom_smooth(method = "lm", colour = reference_line_color, linewidth = 0.9, se = TRUE) +
   scale_y_continuous(labels = scales::label_percent(accuracy = 1)) +
   labs(
     x = "LC fICVF (NODDI restricted diffusion)",
@@ -407,9 +411,9 @@ p_roc <- ggplot(roc_rf, aes(x = fpr, y = tpr, colour = label)) +
   geom_line(linewidth = 1) +
   scale_colour_manual(
     values = c(
-      setNames("#61AFEF", auc_map["Baseline"]),
-      setNames("#E06C75", auc_map["DSP"]),
-      "Chance" = "grey60"
+      setNames(roc_feature_colors["Baseline"], auc_map["Baseline"]),
+      setNames(roc_feature_colors["DSP"], auc_map["DSP"]),
+      "Chance" = roc_feature_colors["Chance"]
     ),
     name = "Feature set"
   ) +
@@ -438,8 +442,15 @@ p_roc
 #| label: save-lc-plots
 #| include: false
 
+fig_out <- file.path(repo, "reports", "figures")
+dir.create(fig_out, recursive = TRUE, showWarnings = FALSE)
+
 ggsave(
-  file.path(repo, "reports", "figs", "hero_ml_roc.png"),
+  file.path(fig_out, "hero_lc_brain_behavior.png"),
+  p_lc_bb, width = 9, height = 4.5, dpi = 180, bg = "white"
+)
+ggsave(
+  file.path(fig_out, "hero_ml_roc.png"),
   p_roc, width = 7, height = 5.5, dpi = 180, bg = "white"
 )
 ```

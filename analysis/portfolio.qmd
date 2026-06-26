@@ -34,6 +34,9 @@ if (!file.exists(file.path(repo, "reports", "analysis_trial_table.csv"))) {
   repo <- normalizePath(".", winslash = "/", mustWork = TRUE)
 }
 
+source(file.path(repo, "R", "colors_manuscript.R"))
+grip_scale_colors <- grip_level_colors[c("Low (5% MVC)", "High (40% MVC)")]
+
 fig_dir <- file.path(repo, "reports", "figures")
 model_path <- file.path(repo, "reports", "analysis_trial_table.csv")
 fx_path <- file.path(repo, "reports", "cognitive_motor_glmer_fixed_effects.csv")
@@ -349,10 +352,7 @@ p_cat_interactive <- ggplot(subj_sum, aes(
   geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
   geom_segment(aes(xend = subject_ord, yend = 0), linewidth = 0.5, alpha = 0.4) +
   geom_point(size = 2.5) +
-  scale_colour_manual(
-    values = c("Hindered by load" = "#E06C75", "Facilitated by load" = "#61AFEF"),
-    name = NULL
-  ) +
+  scale_colour_manual(values = load_effect_colors[c("Hindered by load", "Facilitated by load")], name = NULL) +
   scale_y_continuous(labels = scales::label_percent(accuracy = 1)) +
   labs(
     x = "Subject (ranked by load cost)",
@@ -426,10 +426,7 @@ p_sat_interactive <- ggplot(sat_paired,
         group = subject_id, text = hover_text)) +
   geom_line(colour = "grey80", linewidth = 0.4, alpha = 0.7) +
   geom_point(size = 2.5, alpha = 0.85) +
-  scale_colour_manual(
-    values = c("High (40% MVC)" = "#E06C75", "Low (5% MVC)" = "#61AFEF"),
-    name = "Grip effort"
-  ) +
+  scale_colour_manual(values = grip_scale_colors, name = "Grip effort") +
   scale_y_continuous(labels = scales::label_percent(accuracy = 1),
                      limits = c(0.35, 1.0)) +
   labs(
