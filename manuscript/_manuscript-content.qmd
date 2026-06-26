@@ -66,6 +66,17 @@ if (file.exists(trial_path)) {
   txt_age_mean   <- sprintf("%.1f", age_mean)
   txt_age_sd     <- sprintf("%.1f", age_sd)
   txt_pct_female <- sprintf("%.0f", pct_female)
+
+  # Spectral outlier exclusion counts (used in Methods behavioral-exclusions paragraph)
+  is_hi  <- tolower(as.character(df$is_high_grip)) %in% c("true", "1")
+  ok_cols <- !is.na(df$resp_is_correct) & !is.na(df$pow_05_3hz) & !is.na(df$pow_8_12hz)
+  df_clean <- df[ok_cols, ]
+  df_clean$pow_8_12hz_z <- ave(df_clean$pow_8_12hz, df_clean$is_high_grip,
+                                FUN = function(x) (x - mean(x)) / sd(x))
+  n_excl <- sum(abs(df_clean$pow_8_12hz_z) > 3.5, na.rm = TRUE)
+  n_total_clean <- nrow(df_clean)
+  txt_n_spectral_excl  <- format(n_excl, big.mark = ",")
+  txt_pct_spectral_excl <- sprintf("%.1f", 100 * n_excl / n_total_clean)
 } else {
   n_subjects  <- 66
   n_trials    <- "~3,700"
@@ -79,6 +90,8 @@ if (file.exists(trial_path)) {
   txt_age_mean   <- sprintf("%.1f", age_mean)
   txt_age_sd     <- sprintf("%.1f", age_sd)
   txt_pct_female <- sprintf("%.0f", pct_female)
+  txt_n_spectral_excl  <- "~30"
+  txt_pct_spectral_excl <- "~0.4"
 }
 ```
 
@@ -125,7 +138,7 @@ The present study treats the 100 Hz dynamometer stream as a continuous behaviora
 
 **Stratification by grip condition.** Low-effort (5% MVC) and high-effort (40% MVC) trials are analyzed separately. At 5% MVC, target-normalized deviations are dominated by precision noise near zero, inflating apparent tremor without indexing meaningful instability. At 40% MVC, the same spectral features carry a direct interpretable sign. Primary inference is organized around the high-effort arm; low-effort and pooled models are reported as comparisons.
 
-**Behavioral exclusions.** Trial-level exclusions followed criteria established in @sun2026modulation. Runs were excluded if more than 90% of same/different responses were to a single button (3.62% of trials removed). Trials with missed same/different responses (1.69%), implausibly fast responses (< 200 ms after the response prompt, which falls 450 ms after probe offset; 1.37%), and failures to maintain target grip force for at least two-thirds of the 2–3 s post-cue window (30–55% MVC for high grip; 1–15% MVC for low grip; 4.00%) were also removed. In total, 90.01% of trials were retained after behavioral cleaning. For the spectral analysis, additional quality screens required that each retained epoch contain no force-clipping artifacts, no missing samples, and sufficient duration for the Welch PSD estimation.
+**Behavioral exclusions.** Trial-level exclusions followed criteria established in @sun2026modulation. Runs were excluded if more than 90% of same/different responses were to a single button (3.62% of trials removed). Trials with missed same/different responses (1.69%), implausibly fast responses (< 200 ms after the response prompt, which falls 450 ms after probe offset; 1.37%), and failures to maintain target grip force for at least two-thirds of the 2–3 s post-cue window (30–55% MVC for high grip; 1–15% MVC for low grip; 4.00%) were also removed. In total, 90.01% of trials were retained after behavioral cleaning. For the spectral analysis, additional quality screens required that each retained epoch contain no force-clipping artifacts, no missing samples, and sufficient duration for the Welch PSD estimation. A final spectral outlier screen removed trials whose tremor-band power exceeded ±3.5 *SD* of the within-condition distribution; inspection revealed that values above this threshold (max observed: *z* ≈ 48.5) were not physiologically plausible and are consistent with isolated recording artifacts that escaped prior cleaning. This screen removed `{r} txt_n_spectral_excl` trials (`{r} txt_pct_spectral_excl`% of the spectral-ready sample) and was applied uniformly to both grip conditions before model fitting.
 
 **Grip-adherence metric.** To quantify compliance with the grip manipulation, we computed a Cohen's *d*-analogue separability metric: the difference between the mean force observed on high-grip trials and the mean force on low-grip trials, divided by the pooled standard deviation. The first 2 s of each trial were excluded from this calculation to allow participants to reach the target. Higher values indicate greater separation between the force distributions and better adherence to the instructed arousal manipulation. This metric is used as a covariate in secondary analyses and as a manipulation check.
 
@@ -165,7 +178,11 @@ prep <- function(df) {
       subject_id       = factor(subject_id),
       pow_05_3hz_z     = as.numeric(scale(pow_05_3hz)),
       pow_8_12hz_z     = as.numeric(scale(pow_8_12hz))
-    )
+    ) %>%
+    # Spectral outlier screen: exclude trials whose tremor-band z-score exceeds ±3.5.
+    # Values beyond this threshold (max observed: z ≈ 48.5) reflect recording artifacts
+    # not plausible physiological tremor; they have high leverage in logistic regression.
+    filter(abs(pow_8_12hz_z) <= 3.5)
 }
 
 high_dat <- raw %>% filter(is_high(is_high_grip)) %>% prep()
