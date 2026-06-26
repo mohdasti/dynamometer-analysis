@@ -122,9 +122,10 @@ knitr::kable(funnel_out, align = c("l", "r", "r", "r", "l"))
 ```{r}
 #| label: tbl-supp-glmer
 #| echo: false
-#| tbl-cap: "Complete fixed-effects tables for baseline and DSP-augmented models (high-grip trials)."
+#| tbl-cap: "Complete fixed-effects tables for baseline and DSP-augmented models (high-grip trials; post-outlier-screen, |tremor z| ≤ 3.5)."
 
-fx <- read.csv(file.path(repo, "reports", "cognitive_motor_glmer_fixed_effects.csv"), check.names = FALSE)
+source(file.path(repo, "R", "manuscript_glmer_table.R"))
+fx <- build_high_grip_fx_table(file.path(repo, "reports", "analysis_trial_table.csv"))
 knitr::kable(fx, align = c("l", "l", "r", "r"))
 ```
 

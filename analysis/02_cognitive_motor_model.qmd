@@ -130,7 +130,8 @@ prep <- function(df) {
       subject_id       = factor(subject_id),
       pow_05_3hz_z     = as.numeric(scale(pow_05_3hz)),
       pow_8_12hz_z     = as.numeric(scale(pow_8_12hz))
-    )
+    ) %>%
+    filter(abs(pow_8_12hz_z) <= 3.5)   # spectral outlier screen (matches manuscript)
 }
 
 high_dat <- raw %>% filter(is_high(is_high_grip)) %>% prep()
