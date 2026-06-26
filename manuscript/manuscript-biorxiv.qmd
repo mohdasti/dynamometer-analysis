@@ -1,0 +1,34 @@
+---
+title: "Continuous Grip-Force Dynamics as an Online Biophysical Signal of Perceptual Strain"
+shorttitle: "Grip-Force Dynamics and Perceptual Strain"
+leadauthor: "Dastgheib"
+author:
+  - name: Mohammad Dastgheib
+    corresponding: true
+    affiliations:
+      - Department of Psychology, University of California, Riverside, Riverside, CA, USA
+    email: mdastgheib@ucr.edu
+abstract: |
+  Older adults frequently perform perceptual decisions while sustaining physical effort, yet most dual-task research treats motor output as a binary manipulation rather than a continuous behavioral signal. Here we ask whether sub-second grip-force dynamics predict trial-level perceptual accuracy in older adults performing auditory and visual same/different discrimination while maintaining low (5%) or high (40%) isometric handgrip force scaled to maximum voluntary contraction. We extracted event-locked spectral power from the continuous dynamometer stream in a visuomotor tracking band (0.5–3.0 Hz) and a physiological tremor band (8.0–12.0 Hz), then tested whether these features explain perceptual accuracy beyond nominal task difficulty using mixed-effects logistic regression and subject-wise cross-validation. Physical load compressed perceptual sensitivity, and tremor-band power showed a numerically negative association with accuracy under high grip (40% MVC), although trial-level effects did not reach conventional significance after controlling for difficulty. Cross-validated models confirmed a modest incremental predictive gain from force features beyond task labels (ΔAUC ≈ 0.005). Exploratory LC microstructure analyses showed non-significant directional trends only.
+keywords:
+  - aging
+  - dual-task
+  - handgrip force
+  - perceptual decision-making
+  - physiological tremor
+  - cognitive-motor interference
+correspondence-email: mdastgheib@ucr.edu
+date: "2026-06-24"
+bibliography: references.bib
+format:
+  biorxiv-typst:
+    columns: 2
+    toc: false
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: true
+---
+
+{{< include _manuscript-content.qmd >}}

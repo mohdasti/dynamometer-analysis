@@ -1,0 +1,18 @@
+---
+title: "Continuous Grip-Force Dynamics as an Online Biophysical Signal of Perceptual Strain"
+author: "Mohammad Dastgheib"
+date: "2026-06-24"
+bibliography: references.bib
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: true
+  pdf:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+---
+
+{{< include _manuscript-content.qmd >}}

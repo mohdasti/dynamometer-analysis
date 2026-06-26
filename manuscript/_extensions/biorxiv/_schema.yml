@@ -1,0 +1,19 @@
+$schema: https://m.canouil.dev/quarto-wizard/assets/schema/v1/extension-schema.json
+
+formats:
+  biorxiv-typst:
+    columns:
+      type: integer
+      default: 2
+      enum:
+        - 1
+        - 2
+      description: Number of columns in the manuscript layout.
+    bibliographystyle:
+      type: string
+      default: springer-basic
+      description: Typst bibliography style name or CSL path.
+    toc:
+      type: boolean
+      default: false
+      description: Show or hide table of contents.

@@ -1,0 +1,148 @@
+---
+title: "Supplementary Materials"
+subtitle: "Continuous Grip-Force Dynamics as an Online Biophysical Signal of Perceptual Strain"
+author: "Mohammad Dastgheib"
+date: "2026-06-24"
+bibliography: references.bib
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: true
+  pdf:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+---
+
+Main manuscript: [manuscript.qmd](manuscript.qmd) (HTML/PDF) · [manuscript-biorxiv.qmd](manuscript-biorxiv.qmd) (bioRxiv preprint PDF)
+
+```{r}
+#| label: supp-setup
+#| include: false
+
+suppressPackageStartupMessages(library(dplyr))
+repo <- normalizePath("..", winslash = "/", mustWork = TRUE)
+```
+
+# Signal processing and feature extraction {#sec-supp-dsp}
+
+Grip-force preprocessing followed the pipeline documented in the main Methods and in `analysis/01_ingest.qmd`:
+
+1. Target-normalized error: $e(t) = (F(t) - F_\text{target}) / F_\text{target}$
+2. Linear detrending within each trial epoch
+3. Fourth-order zero-phase Butterworth high-pass filter at 0.5 Hz (`sosfiltfilt`)
+4. Welch PSD estimation (Hann window, 50% overlap, ~0.5 Hz resolution)
+5. Band integration: visuomotor tracking (0.5–3.0 Hz) and physiological tremor (8.0–12.0 Hz)
+
+Epochs spanned grip-cue onset through 1 s after probe onset. All spectral features were log-transformed before modeling.
+
+# Model specifications {#sec-supp-models}
+
+**Mixed-effects logistic regression.** Perceptual accuracy was modeled as:
+
+$$\text{logit}\, P(\text{correct}) = \beta_0 + \beta_1 \text{modality} + \sum_{k=1}^{4} \beta_{k} \text{poly}_k(\text{difficulty}) + \beta_5 z(\text{tracking}) + \beta_6 z(\text{tremor}) + u_i$$
+
+where $u_i \sim \mathcal{N}(0, \sigma^2)$ is a random intercept for participant $i$, and $z(\cdot)$ denotes within-condition standardized band power. Primary inference used high-grip trials only (40% MVC); low-grip models used the same structure.
+
+**Cross-validated machine learning.** Random-forest and logistic classifiers were trained with subject-wise cross-validation (leave-one-subject-out) on high-grip trials. Feature sets compared:
+
+- **Baseline:** stimulus difficulty level, task modality
+- **DSP:** baseline features plus tracking- and tremor-band power
+
+Performance was evaluated using area under the ROC curve (AUC).
+
+```{r}
+#| label: tbl-supp-auc
+#| echo: false
+#| tbl-cap: "Cross-validated AUC for perceptual accuracy prediction (high-grip trials)."
+
+repo <- normalizePath("..", winslash = "/", mustWork = TRUE)
+auc <- read.csv(file.path(repo, "reports", "ml_auc_summary.csv"))
+auc_out <- auc |>
+  mutate(AUC = sprintf("%.4f", auc)) |>
+  select(`Feature set` = feature_set, Model = model, AUC, `N trials` = n)
+knitr::kable(auc_out, align = c("l", "l", "r", "r"))
+```
+
+# Sample coverage and attrition {#sec-supp-coverage}
+
+```{r}
+#| label: tbl-supp-attrition
+#| echo: false
+#| tbl-cap: "Grip-force data attrition funnel from behavioral oddball tasks to analysis-ready trials."
+
+funnel <- read.csv(file.path(repo, "reports", "grip_attrition_funnel.csv"))
+funnel_out <- funnel |>
+  mutate(
+    `Trials` = ifelse(is.na(n_trials), "—", format(n_trials, big.mark = ",")),
+    `% retainable` = ifelse(is.na(pct_of_retainable_beh), "—", sprintf("%.1f%%", pct_of_retainable_beh))
+  ) |>
+  select(Stage = stage, `Subject-tasks` = n_subject_tasks, Trials, `% retainable`, Note = note)
+knitr::kable(funnel_out, align = c("l", "r", "r", "r", "l"))
+```
+
+# Additional figures and tables {#sec-supp-figures}
+
+**Single-trial signal chain.** Representative high-grip incorrect trial showing the transformation from raw force to normalized error, rolling variance, and Welch PSD with analysis bands marked.
+
+![Single-trial signal chain from grip force to spectral phenotype.](figures/hero_single_trial_anatomy.png){#fig-supp-anatomy width=95%}
+
+**Probe-locked spectrogram.** Time–frequency power aligned to probe onset (*t* = 0), with normalized error in the upper panel.
+
+![Probe-locked motor spectrogram aligned to oddball onset.](figures/hero_probe_locked_spectrogram.png){#fig-supp-spectrogram width=90%}
+
+**Population spectral distributions.**
+
+![Trial-level log band-power by grip effort and perceptual outcome.](figures/hero_spectral_fingerprint.png){#fig-supp-spectral-fingerprint width=90%}
+
+![Two-band feature space (tracking vs. tremor), split by grip effort.](figures/hero_spectral_feature_space.png){#fig-supp-feature-space width=90%}
+
+**Manipulation checks and individual differences.**
+
+![Per-subject high-grip force compliance (actual / target).](figures/hero_grip_compliance.png){#fig-supp-compliance width=85%}
+
+![Subject-level accuracy drop under high versus low grip (caterpillar plot).](figures/hero_caterpillar.png){#fig-supp-caterpillar width=90%}
+
+![Speed–accuracy trade-off under low versus high grip.](figures/hero_sat_tradeoff.png){#fig-supp-sat width=85%}
+
+**Predictive modeling and brain–behavior.**
+
+![Cross-validated ROC curves (random forest, high-grip trials).](figures/hero_ml_roc.png){#fig-supp-ml-roc width=80%}
+
+![Exploratory LC fICVF associations with load-related tremor reactivity and perceptual load cost.](figures/hero_lc_brain_behavior.png){#fig-supp-lc-behavior width=90%}
+
+**Full fixed-effects table.**
+
+```{r}
+#| label: tbl-supp-glmer
+#| echo: false
+#| tbl-cap: "Complete fixed-effects tables for baseline and DSP-augmented models (high-grip trials)."
+
+fx <- read.csv(file.path(repo, "reports", "cognitive_motor_glmer_fixed_effects.csv"), check.names = FALSE)
+knitr::kable(fx, align = c("l", "l", "r", "r"))
+```
+
+# Reproducibility {#sec-supp-repro}
+
+Analysis notebooks live in `analysis/`:
+
+| Notebook | Purpose |
+|---|---|
+| `01_ingest.qmd` | Trial table construction and spectral feature extraction |
+| `02_cognitive_motor_model.qmd` | Mixed-effects models and LC brain–behavior analyses |
+| `03_hero_visuals.qmd` | Figure generation for manuscript and portfolio |
+
+Render from the repository root:
+
+```bash
+quarto render analysis/01_ingest.qmd
+quarto render analysis/02_cognitive_motor_model.qmd
+quarto render analysis/03_hero_visuals.qmd
+quarto render manuscript/manuscript.qmd
+quarto render manuscript/manuscript-biorxiv.qmd --to biorxiv-typst
+quarto render manuscript/supplementary.qmd
+```
+
+Local data paths are configured in `config/paths.local.yaml` (not tracked in git).

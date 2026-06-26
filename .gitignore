@@ -17,6 +17,10 @@ _site/
 # Rendered HTML (generated; not source of truth)
 analysis/*.html
 analysis/*_files/
+manuscript/*.html
+manuscript/*_files/
+manuscript/*.typ
+manuscript/*.quarto_ipynb
 
 # R model objects (large binary; regenerate from qmd)
 reports/*.rds

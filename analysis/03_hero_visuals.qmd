@@ -1093,7 +1093,7 @@ fig_flip <- p_slopes + p_or +
   plot_annotation(
     title = "Opposite Signs: Tremor Means Something Different Under Load",
     subtitle = paste0(
-      "**Left:** population-level accuracy vs tremor (visual task, medium difficulty). ",
+      "**Left:** population-level accuracy vs tremor (modality and difficulty covariates; predictions averaged across auditory/visual tasks and all stimulus levels). ",
       "**Right:** odds-ratio forest plot.<br>",
       "High grip OR < 1 (more tremor → more errors). ",
       "Low grip OR > 1 (precision-noise artifact of near-zero 5% MVC target)."
