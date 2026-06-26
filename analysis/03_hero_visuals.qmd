@@ -950,11 +950,13 @@ flip_base <- model_tbl %>%
     )
   )
 
-# z-score tremor *within* each grip stratum so slopes are comparable
+# z-score tremor *within* each grip stratum, then exclude spectral outliers (|z| > 3.5)
 flip_high <- flip_base %>% filter(grip_label == "High grip (40% MVC)") %>%
-  mutate(tremor_z = as.numeric(scale(pow_8_12hz)))
+  mutate(tremor_z = as.numeric(scale(pow_8_12hz))) %>%
+  filter(abs(tremor_z) <= 3.5)
 flip_low  <- flip_base %>% filter(grip_label == "Low grip (5% MVC)") %>%
-  mutate(tremor_z = as.numeric(scale(pow_8_12hz)))
+  mutate(tremor_z = as.numeric(scale(pow_8_12hz))) %>%
+  filter(abs(tremor_z) <= 3.5)
 
 m_flip_high <- glmer(
   resp ~ tremor_z + task_modality + stim_level_index + (1 | subject_id),
@@ -1013,15 +1015,17 @@ flip_curves <- rbind(
 flip_curves$label <- factor(flip_curves$label,
   levels = c("High grip\n(40% MVC)", "Low grip\n(5% MVC)"))
 
-# Empirical bins per grip
+# Empirical bins per grip — use -Inf/Inf outer edges so no trial lands in <NA>
 bin_flip <- function(dat, label) {
   dat %>%
-    mutate(tbin = cut(tremor_z, breaks = seq(-2.5, 2.5, by = 1))) %>%
+    mutate(tbin = cut(tremor_z,
+                      breaks = c(-Inf, -1.5, -0.5, 0.5, 1.5, Inf),
+                      labels = c("< -1.5", "-1.5–-0.5", "-0.5–0.5", "0.5–1.5", "> 1.5"))) %>%
     group_by(tbin) %>%
     summarise(
       acc  = mean(resp, na.rm = TRUE),
       se   = sqrt(acc * (1 - acc) / n()),
-      tmid = mean(tremor_z, na.rm = TRUE),
+      tmid = pmin(pmax(mean(tremor_z, na.rm = TRUE), -2.5), 2.5),
       n    = n(), .groups = "drop"
     ) %>%
     filter(n >= 20) %>%
@@ -1096,12 +1100,12 @@ p_slopes <- ggplot() +
 fig_flip <- p_slopes + p_or +
   plot_layout(widths = c(2.2, 1)) +
   plot_annotation(
-    title = "Opposite Signs: Tremor Means Something Different Under Load",
+    title = "Stratified Tremor–Accuracy Associations: High vs Low Grip",
     subtitle = paste0(
       "**Left:** population-level accuracy vs tremor (modality and difficulty covariates; predictions averaged across auditory/visual tasks and all stimulus levels). ",
       "**Right:** odds-ratio forest plot.<br>",
-      "High grip OR < 1 (more tremor → more errors). ",
-      "Low grip OR > 1 (precision-noise artifact of near-zero 5% MVC target)."
+      "Both strata show small negative associations of similar sign and magnitude; ",
+      "tremor × grip interaction was not significant."
     ),
     theme = theme(
       plot.title    = element_markdown(face = "bold", size = 15, hjust = 0),
