@@ -1,6 +1,6 @@
 ---
 title: "Supplementary Materials"
-subtitle: "Continuous Grip-Force Dynamics as an Online Biophysical Signal of Perceptual Strain"
+subtitle: "Can Grip-Force Dynamics Track Perceptual Strain? A Trial-Level Spectral Analysis in Older Adults"
 author: "Mohammad Dastgheib"
 date: "2026-06-24"
 bibliography: references.bib
@@ -127,6 +127,31 @@ knitr::kable(funnel_out, align = c("l", "r", "r", "r", "l"))
 fx <- read.csv(file.path(repo, "reports", "cognitive_motor_glmer_fixed_effects.csv"), check.names = FALSE)
 knitr::kable(fx, align = c("l", "l", "r", "r"))
 ```
+
+# Spectral Outlier Robustness {#sec-supp-sensitivity}
+
+The primary analysis excluded trials whose tremor-band power z-score (computed within each grip arm) exceeded ±3.5 SD. Accuracy labels were not used in defining this screen. The table below shows results under four alternative screening rules to assess sensitivity of the main finding.
+
+```{r}
+#| label: tbl-supp-sensitivity
+#| echo: false
+#| tbl-cap: "Sensitivity of the high-grip DSP model to alternative spectral outlier screens. Tremor OR and 95% CI from the DSP-augmented mixed-effects logistic model; LRT p compares the DSP-augmented vs. baseline model. The primary analysis (|z| > 3.5) is shown in bold."
+
+sens <- read.csv(file.path(repo, "reports", "sensitivity_outlier_screen.csv"), check.names = FALSE)
+# Add primary marker
+sens$`Outlier rule` <- ifelse(
+  grepl("3\\.5", sens$`Outlier rule`) & grepl("Exclude", sens$`Outlier rule`),
+  paste0("**", sens$`Outlier rule`, "** *(primary)*"),
+  sens$`Outlier rule`
+)
+sens$`95% CI` <- sprintf("[%.2f, %.2f]", sens$`95% CI lo`, sens$`95% CI hi`)
+out <- sens[, c("Outlier rule", "N removed", "N trials", "Tremor OR", "95% CI", "Tremor p", "LRT p")]
+knitr::kable(out, align = c("l", "r", "r", "r", "c", "c", "c"))
+```
+
+**Interpretation:** The negative tremor-accuracy association is statistically significant across all four screening approaches, including no-removal (winsorization) and more or less aggressive exclusion thresholds. The no-screen model (OR = 0.96, LRT *p* = .447) shows that the 23 removed high-grip trials exerted high leverage: their extreme x-values (max *z* ≈ 48.5) with moderate accuracy pulled the slope toward zero. Their removal is justified on physiological grounds — no isometric grip-force epoch should produce tremor-band power 48 SD above the population mean — independent of accuracy outcomes.
+
+**Outlier distribution:** The `r 23` removed high-grip trials came from `r 4` participants (BAP139, BAP166, BAP171, BAP176; IDs shown here for reproducibility), distributed across both auditory (*n* = 12) and visual (*n* = 11) modalities, suggesting scattered recording artifacts rather than a single systematic run failure.
 
 # Reproducibility {#sec-supp-repro}
 

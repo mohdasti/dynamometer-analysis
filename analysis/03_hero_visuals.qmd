@@ -515,6 +515,10 @@ spec_dat <- model_tbl %>%
     !is.na(pow_05_3hz), !is.na(pow_8_12hz), !is.na(resp_is_correct),
     pow_05_3hz > 0, pow_8_12hz > 0
   ) %>%
+  group_by(is_high_grip) %>%
+  mutate(pow_8_12hz_z = as.numeric(scale(pow_8_12hz))) %>%
+  ungroup() %>%
+  filter(abs(pow_8_12hz_z) <= 3.5) %>%   # match analysis exclusion
   mutate(
     grip_effort = ifelse(
       tolower(as.character(is_high_grip)) == "true",
