@@ -42,11 +42,13 @@ BAP data/
 
 ### Task types (from filenames)
 
-| Task | File count | Likely paradigm |
-|------|----------:|-----------------|
-| Aoddball | 84 | Auditory oddball in scanner |
-| Voddball | 72 | Visual oddball in scanner |
-| MVCnPRAC | 46 | MVC calibration + practice |
+Analysis uses **oddball tasks only**; MVCnPRAC calibration runs are excluded from pipelines (MVC comes from behavioral `mvc` column).
+
+| Task | File count | Status |
+|------|----------:|--------|
+| Aoddball | 84 | Included |
+| Voddball | 72 | Included |
+| MVCnPRAC | 46 | Excluded from analysis |
 
 ### Filename pattern
 

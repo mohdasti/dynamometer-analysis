@@ -1,0 +1,5 @@
+feature_set,model,auc,n
+Baseline,Logistic,0.617,7001
+Baseline,RandomForest,0.8498,7001
+DSP,Logistic,0.6279,6911
+DSP,RandomForest,0.8553,6911

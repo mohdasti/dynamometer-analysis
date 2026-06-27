@@ -1,0 +1,33 @@
+subject_id,task_modality,status,n_files_ses23,n_files_all_sessions,sessions_all,example_path
+BAP001,aud,FOUND (ses 2/3),5,5,2,sub-BAP001/ses-2/InsideScanner/subjectBAP001_Aoddball_session2_run3_8_31_11_3_gripforce.csv
+BAP001,vis,FOUND (ses 2/3),1,1,3,sub-BAP001/ses-3/InsideScanner/subjectBAP001_Voddball_session3_run4_9_1_10_34_gripforce.csv
+BAP108,aud,FOUND (ses 2/3),5,5,2,sub-BAP108/ses-2/InsideScanner/subjectBAP108_Aoddball_session2_run1_8_31_15_3_gripforce.csv
+BAP108,vis,FOUND (ses 2/3),5,5,3,sub-BAP108/ses-3/InsideScanner/subjectBAP108_Voddball_session3_run5_9_2_10_43_gripforce.csv
+BAP123,aud,FOUND (ses 2/3),5,5,3,sub-BAP123/ses-3/InsideScanner/subjectBAP123_Aoddball_session3_run2_12_1_11_9_gripforce.csv
+BAP123,vis,FOUND (ses 2/3),5,5,2,sub-BAP123/ses-2/InsideScanner/subjectBAP123_Voddball_session2_run5_11_30_17_41_gripforce.csv
+BAP124,aud,STILL MISSING,0,0,—,
+BAP124,vis,FOUND (ses 2/3),5,5,3,sub-BAP124/ses-3/InsideScanner/subjectBAP124_Voddball_session3_run4_12_7_11_8_gripforce.csv
+BAP151,aud,FOUND (ses 2/3),1,1,3,sub-BAP151/ses-3/InsideScanner/subjectBAP151_Aoddball_session3_run5_3_16_14_29_gripforce.csv
+BAP151,vis,STILL MISSING,0,0,—,
+BAP158,aud,FOUND (ses 2/3),2,2,2,sub-BAP158/ses-2/InsideScanner/subjectBAP158_Aoddball_session2_run1_4_21_9_39_gripforce.csv
+BAP158,vis,FOUND (ses 2/3),1,1,3,sub-BAP158/ses-3/InsideScanner/subjectBAP158_Voddball_session3_run4_4_28_10_16_gripforce.csv
+BAP159,aud,FOUND (ses 2/3),4,4,3,sub-BAP159/ses-3/InsideScanner/subjectBAP159_Aoddball_session3_run1_7_11_8_45_gripforce.csv
+BAP159,vis,FOUND (ses 2/3),5,5,2,sub-BAP159/ses-2/InsideScanner/subjectBAP159_Voddball_session2_run3_7_10_10_54_gripforce.csv
+BAP166,aud,STILL MISSING,0,0,—,
+BAP166,vis,FOUND (ses 2/3),4,4,2,sub-BAP166/ses-2/InsideScanner/subjectBAP166_Voddball_session2_run4_4_11_10_26_gripforce.csv
+BAP170,aud,FOUND (ses 2/3),5,5,2,sub-BAP170/ses-2/InsideScanner/subjectBAP170_Aoddball_session2_run2_4_25_13_36_gripforce.csv
+BAP170,vis,FOUND (ses 2/3),5,5,3,sub-BAP170/ses-3/InsideScanner/subjectBAP170_Voddball_session3_run1_5_2_15_59_gripforce.csv
+BAP171,aud,STILL MISSING,0,0,—,
+BAP171,vis,FOUND (ses 2/3),5,5,2,sub-BAP171/ses-2/InsideScanner/subjectBAP171_Voddball_session2_run3_4_27_15_33_gripforce.csv
+BAP173,aud,FOUND (ses 2/3),5,5,3,sub-BAP173/ses-3/InsideScanner/subjectBAP173_Aoddball_session3_run3_5_19_16_5_gripforce.csv
+BAP173,vis,FOUND (ses 2/3),5,5,2,sub-BAP173/ses-2/InsideScanner/subjectBAP173_Voddball_session2_run1_5_17_15_44_gripforce.csv
+BAP177,aud,FOUND (ses 2/3),5,5,3,sub-BAP177/ses-3/InsideScanner/subjectBAP177_Aoddball_session3_run4_7_20_15_52_gripforce.csv
+BAP177,vis,FOUND (ses 2/3),5,5,2,sub-BAP177/ses-2/InsideScanner/subjectBAP177_Voddball_session2_run4_7_19_15_0_gripforce.csv
+BAP191,aud,FOUND (ses 2/3),5,5,2,sub-BAP191/ses-2/InsideScanner/subjectBAP191_Aoddball_session2_run5_4_26_10_24_gripforce.csv
+BAP191,vis,FOUND (ses 2/3),5,5,3,sub-BAP191/ses-3/InsideScanner/subjectBAP191_Voddball_session3_run3_5_3_10_9_gripforce.csv
+BAP197,aud,FOUND (ses 2/3),5,5,2,sub-BAP197/ses-2/InsideScanner/subjectBAP197_Aoddball_session2_run5_7_2_14_17_gripforce.csv
+BAP197,vis,FOUND (ses 2/3),5,5,3,sub-BAP197/ses-3/InsideScanner/subjectBAP197_Voddball_session3_run2_7_17_13_46_gripforce.csv
+BAP199,aud,FOUND (ses 2/3),5,5,2,sub-BAP199/ses-2/InsideScanner/subjectBAP199_Aoddball_session2_run4_7_16_12_12_gripforce.csv
+BAP199,vis,FOUND (ses 2/3),5,5,3,sub-BAP199/ses-3/InsideScanner/subjectBAP199_Voddball_session3_run3_7_23_11_53_gripforce.csv
+BAP202,aud,FOUND (ses 2/3),2,2,3,sub-BAP202/ses-3/InsideScanner/subjectBAP202_Aoddball_session3_run4_1_13_15_59_gripforce.csv
+BAP202,vis,STILL MISSING,0,0,—,

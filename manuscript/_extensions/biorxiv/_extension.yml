@@ -1,0 +1,18 @@
+title: bioRxiv (Typst) PDF
+author: Chiraag Gohel
+version: 0.1.0
+quarto-required: ">= 1.8.0"
+contributes:
+  formats:
+    typst:
+      papersize: us-letter
+      columns: 2
+      toc: false
+      bibliographystyle: springer-basic
+      filters:
+        - biorxiv.lua
+      template-partials:
+        - typst-template.typ
+        - typst-show.typ
+        - page.typ
+        - biblio.typ

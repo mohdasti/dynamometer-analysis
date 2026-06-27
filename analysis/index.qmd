@@ -1,0 +1,53 @@
+---
+title: "Cognitive–Motor Interference Under Load"
+subtitle: "Bridging DSP Engineering and Statistical Storytelling"
+author: "Mohd Dastgheib"
+format:
+  html:
+    toc: false
+    code-fold: true
+    code-summary: "View the underlying logic"
+    theme: cosmo
+    page-layout: article
+---
+
+## Case study at a glance
+
+In-scanner grip-force (100 Hz) was recorded while participants performed auditory and visual oddball decisions under low- and high-effort grip conditions. This portfolio demonstrates an end-to-end pipeline: **Python for signal processing**, **R for mixed modeling and visualization**, and **Quarto for reproducible delivery**.
+
+| Module | Document | What it proves |
+|--------|----------|----------------|
+| **Full portfolio (one file)** | [portfolio.qmd](portfolio.qmd) → `portfolio_case_study.html` | **Single self-contained HTML** for LLM / reviewer upload |
+| **Ingest & DSP** | [01 — Data ingestion](01_ingest.qmd) | Target-normalized features, zero-phase filtering, trial-level QA |
+| **Modeling** | [02 — Cognitive–motor models](02_cognitive_motor_model.qmd) | Mixed-effects logistic regression, model comparison, publication tables |
+| **Storytelling** | [03 — Hero visuals](03_hero_visuals.qmd) | Single-trial anatomy + population-level behavioral lift |
+
+## Problem
+
+Does high-frequency motor instability during grip maintenance predict perceptual errors—and does physical load amplify that relationship?
+
+## Approach
+
+1. **Normalize** force traces to each trial's MVC target so spectral power reflects tracking quality, not raw effort level.
+2. **Filter** with `sosfiltfilt` high-pass (0.5 Hz) after detrending to prevent macro drift from contaminating tremor-band features.
+3. **Model** trial-level accuracy with random intercepts for subject and compare baseline vs DSP-augmented GLMMs.
+4. **Communicate** with stacked time-domain anatomy, probe-locked spectrograms, population spectral fingerprints, and marginal-effects plots designed for quantitative UX / human-factors audiences.
+
+## Key outcomes
+
+- **~3,700** analysis-ready trials across **45** subjects (aud + vis oddball)
+- Force QA: recomputed trial means correlate **r ≈ 0.99** with behavioral v3 summaries
+- Tremor-band power shows a **marginal association** with accuracy under high grip after covariate adjustment
+
+## Reproduce locally (Positron)
+
+1. Open the **repo root** as the project folder (not an individual `.qmd`).
+2. Configure `config/paths.local.yaml` with local grip + behavioral paths.
+3. Run modules in order: `01_ingest.qmd` → `02_cognitive_motor_model.qmd` → `03_hero_visuals.qmd`.
+4. Or render all: `quarto render analysis/`
+
+> **Positron tip:** If chunks look stale, close the `.qmd` without saving and reopen from disk to reload the on-disk version.
+
+## Technical stack
+
+Python · SciPy (`sosfiltfilt`, Welch PSD) · pandas · R · lme4 · ggplot2 · patchwork · plotly · Quarto

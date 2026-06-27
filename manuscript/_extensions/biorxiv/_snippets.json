@@ -1,0 +1,25 @@
+{
+  "biorxiv-typst format": {
+    "prefix": "biorxiv-format",
+    "body": [
+      "format:",
+      "  typst:",
+      "    columns: ${1|1,2|}",
+      "    bibliographystyle: ${2:springer-basic}",
+      "    toc: false"
+    ],
+    "description": "Insert biorxiv-typst format options."
+  },
+  "bioRxiv author entry": {
+    "prefix": "author",
+    "body": [
+      "author:",
+      "  - name: ${1:Jane Doe}",
+      "    corresponding: ${2:true}",
+      "    affiliations:",
+      "      - ${3:Department, Institution, City, Country}",
+      "    email: ${4:jane.doe@example.org}"
+    ],
+    "description": "Insert an author block compatible with biorxiv-quarto metadata handling."
+  }
+}

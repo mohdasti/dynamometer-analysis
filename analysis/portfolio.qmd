@@ -1,0 +1,570 @@
+---
+title: "Cognitive–Motor Interference Under Load"
+subtitle: "Complete Portfolio Case Study — BAP Gripforce × Perceptual Decision-Making"
+author: "Mohd Dastgheib"
+date: last-modified
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    number-sections: true
+    theme: cosmo
+    code-fold: true
+    code-summary: "View code"
+    embed-resources: true
+    fig-width: 9
+    fig-dpi: 144
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup
+
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(gt)
+})
+
+repo <- normalizePath("..", winslash = "/", mustWork = TRUE)
+if (!file.exists(file.path(repo, "reports", "analysis_trial_table.csv"))) {
+  repo <- normalizePath(".", winslash = "/", mustWork = TRUE)
+}
+
+source(file.path(repo, "R", "colors_manuscript.R"))
+grip_scale_colors <- grip_level_colors[c("Low (5% MVC)", "High (40% MVC)")]
+
+fig_dir <- file.path(repo, "reports", "figures")
+model_path <- file.path(repo, "reports", "analysis_trial_table.csv")
+fx_path <- file.path(repo, "reports", "cognitive_motor_glmer_fixed_effects.csv")
+attrition_path <- file.path(repo, "reports", "grip_attrition_funnel.csv")
+
+stopifnot(
+  file.exists(model_path),
+  file.exists(fx_path)
+)
+
+model_tbl <- read.csv(model_path, stringsAsFactors = FALSE)
+fx_tbl <- read.csv(fx_path, stringsAsFactors = FALSE)
+attrition <- read.csv(attrition_path, stringsAsFactors = FALSE)
+
+n_trials <- nrow(model_tbl)
+n_subjects <- length(unique(model_tbl$subject_id))
+force_r <- cor(
+  model_tbl$grip_force_mean,
+  model_tbl$grip_force_mean_au,
+  use = "complete.obs"
+)
+
+fig_files <- c(
+  "hero_single_trial_anatomy.png",
+  "hero_probe_locked_spectrogram.png",
+  "hero_spectral_fingerprint.png",
+  "hero_spectral_feature_space.png",
+  "hero_tremor_accuracy_lift.png",
+  "hero_grip_compliance.png",
+  "hero_psychometric_by_grip.png",
+  "hero_direction_flip.png",
+  "hero_psd_ribbon.png",
+  "hero_caterpillar.png",
+  "hero_sat_tradeoff.png",
+  "hero_shap_importance.png",
+  "hero_shap_tremor_by_difficulty.png",
+  "hero_windowed_tremor_model.png"
+)
+fig_paths <- file.path(fig_dir, fig_files)
+missing_figs <- fig_paths[!file.exists(fig_paths)]
+if (length(missing_figs) > 0) {
+  stop(
+    "Missing figures. Run `quarto render analysis/03_hero_visuals.qmd` first:\n",
+    paste(missing_figs, collapse = "\n")
+  )
+}
+```
+
+## Case study architecture {#architecture}
+
+A dual-layer pipeline: **explanatory modeling** to isolate the cognitive–motor interference mechanism, then **prospective ML** to quantify its operational value.
+
+| Section | Method | Key Visual | UX / Product Takeaway |
+|---|---|---|---|
+| **01 Ingestion & Validation** | Epoch slicing via `elapsed_time` reset detection | Run-clock sawtooth check + attrition funnel | Handles raw, unsegmented 100 Hz streaming sensor logs |
+| **02 Feature Extraction** | Target-normalized error → zero-phase 4th-order Butterworth → Welch PSD | Single-trial anatomy (Raw → Normalized → Tremor bands) | Mastery of DSP workflows and physiological artifact isolation |
+| **03 Event-Locked Window Analysis** | Pre/post-probe lLMER: log(tremor) ~ Window × Difficulty + (1\|subject) | Pre→post tremor surge at max difficulty (p < 0.001) | Motor system destabilises at the exact millisecond of peak cognitive demand |
+| **04 Inferential Modeling** | Stratified GLMM (`glmer`) high vs. low grip, orthogonal difficulty vectors | Odds ratio forest plot + psychometric lift curves | Isolates precision-noise artifact from genuine somatic interference |
+| **05 Predictive ML** | GroupKFold Random Forest (leave-one-subject-out) | ROC-AUC lift curve + SHAP importance bar chart | Builds generalizable error-prediction pipelines for wearable telemetry |
+| **06 Brain–Behavior Fusion** | LC fICVF / LC CNR moderation regression | Scatterplots: Δ tremor ~ LC microstructure | Synthesizes continuous biometrics with structural neuroimaging |
+
+---
+
+## LLM / reviewer brief {#llm-brief}
+
+**One-sentence pitch:** Continuous 100 Hz grip-force streams carry trial-level spectral signatures of cognitive–motor interference that predict perceptual oddball accuracy beyond nominal effort labels.
+
+**Dataset:** Older-adult BAP cohort · auditory + visual oddball · low/high grip effort · `r n_trials` analysis trials · `r n_subjects` subjects.
+
+**Pipeline:** Target-normalized force error → linear detrend → zero-phase 0.5 Hz high-pass (`sosfiltfilt`) → Welch PSD → band power (0.5–3 Hz tracking, 8–12 Hz tremor) → mixed-effects logistic regression of `resp_is_correct`.
+
+**Primary analysis:** High grip only (40% MVC). Low grip (5% MVC) is a comparison arm — pooled models are misleading because tremor effects flip sign across grip conditions.
+
+**Headline results:**
+
+- Force QA: recomputed trial means vs behavioral v3, **r = `r sprintf('%.3f', force_r)`**.
+- High-grip compliance: median 1.09× target (40% MVC held with high fidelity across 44 subjects).
+- **Direction flip:** tremor OR < 1 under high grip (interference prediction); OR > 1 under low grip (precision-noise artifact of near-zero target).
+- Psychometric function: physical load compresses P("Different") at intermediate signal levels (Δ2).
+
+**Ask for feedback on:** (1) scientific narrative, (2) figure clarity for quant-UX portfolio, (3) whether probe-locked spectrogram supports the “cognitive shock” claim, (4) modeling choices.
+
+---
+
+## 1. Scientific framing
+
+### Research question
+
+Does the moment-to-moment quality of concurrent grip-force control during perceptual decision-making predict accuracy beyond task modality, stimulus difficulty, and grip effort condition?
+
+### Hypothesis
+
+The motor system acts as a high-fidelity mirror of cognitive processing: high-frequency instability (8–12 Hz tremor band) and low-frequency tracking error (0.5–3 Hz) during dual-task performance should explain perceptual errors, especially under physical load.
+
+### Why spectral features?
+
+Prior work treats grip as a binary effort covariate. We treat the 100 Hz stream as a **continuous behavioral phenotype**, extracting physics-informed features that survive target normalization (same arbitrary units as behavioral v3 `grip_force_mean_au`).
+
+---
+
+## 2. Cohort & attrition
+
+```{r}
+#| label: attrition-table
+
+attrition %>%
+  gt() %>%
+  tab_header(
+    title = "Grip analysis attrition funnel",
+    subtitle = "Trial counts at each stage; % of retainable behavioral trials in final column"
+  ) %>%
+  cols_label(
+    stage = "Stage",
+    n_subject_tasks = "Subject-tasks",
+    n_trials = "Trials",
+    pct_of_retainable_beh = "% retainable beh",
+    note = "Note"
+  ) %>%
+  fmt_number(columns = pct_of_retainable_beh, decimals = 1, pattern = "{x}%") %>%
+  sub_missing(columns = pct_of_retainable_beh, missing_text = "—") %>%
+  tab_options(table.font.size = px(13))
+```
+
+**Analysis set:** `r format(n_trials, big.mark = ",")` trials in behavioral v3 · **`r format(sum(attrition$n_trials[attrition$stage == "Analysis set (trial features extracted)"]), big.mark = ",")` trials with grip features** (`r sprintf("%.0f%%", attrition$pct_of_retainable_beh[attrition$stage == "Analysis set (trial features extracted)"])` of retainable behavioral) · `r n_subjects` subjects · aud + vis oddball only.
+
+---
+
+## 3. DSP pipeline
+
+Per trial, per 100 Hz sample:
+
+$$
+e(t) = \frac{F(t) - F_{\text{target}}}{F_{\text{target}}}, \quad F_{\text{target}} = \text{grip\_targ\_prop\_mvc} \times \text{mvc}
+$$
+
+1. **RMS error** on raw $e(t)$
+2. **Linear detrend** → **4th-order Butterworth high-pass @ 0.5 Hz** (`scipy.signal.sosfiltfilt`, zero-phase)
+3. **Welch PSD** → integrate **0.5–3 Hz** (tracking) and **8–12 Hz** (tremor)
+
+**Probe timing note:** `stim_offset` is **seconds** for visual trials (probe onset within epoch) but **Hz frequency shift** for auditory trials. Derived column `probe_onset_s` = `stim_offset` (vis) or 0 (aud).
+
+---
+
+## 4. Hero visualizations
+
+### 4.1 Signal chain — time domain + Welch PSD
+
+```{r}
+#| label: fig-anatomy
+#| fig-cap: "Single-trial signal chain: force, normalized error, rolling instability, and Welch PSD with DSP bands."
+
+knitr::include_graphics(fig_paths[1])
+```
+
+### 4.2 Probe-locked spectrogram (cognitive shock)
+
+```{r}
+#| label: fig-specgram
+#| fig-cap: "Probe-locked spectrogram: time × frequency power aligned to oddball onset (t = 0)."
+
+knitr::include_graphics(fig_paths[2])
+```
+
+### 4.3 Population spectral fingerprint
+
+```{r}
+#| label: fig-fingerprint
+#| fig-cap: "Distribution of log10 band power by grip effort and perceptual outcome."
+
+knitr::include_graphics(fig_paths[3])
+```
+
+### 4.4 Two-band feature space
+
+```{r}
+#| label: fig-feature-space
+#| fig-cap: "Tracking vs tremor band power; each point is one trial."
+
+knitr::include_graphics(fig_paths[4])
+```
+
+### 4.5 Behavioral lift — tremor × effort
+
+```{r}
+#| label: fig-lift
+#| fig-cap: "Model-predicted accuracy as a function of tremor-band power, split by grip effort."
+
+knitr::include_graphics(fig_paths[5])
+```
+
+### 4.6 Grip compliance (40% MVC)
+
+```{r}
+#| label: fig-compliance
+#| fig-cap: "Per-subject force compliance confirms high-grip spectral features are well-calibrated."
+
+knitr::include_graphics(fig_paths[6])
+```
+
+### 4.7 Psychometric function under load
+
+```{r}
+#| label: fig-psychometric
+#| fig-cap: "P('Different') rises monotonically with signal strength; high grip compresses the function at intermediate levels."
+
+knitr::include_graphics(fig_paths[7])
+```
+
+### 4.8 Direction flip — tremor under load
+
+```{r}
+#| label: fig-flip
+#| fig-cap: "Opposite tremor slopes and ORs for high vs low grip — the key sanity check."
+
+knitr::include_graphics(fig_paths[8])
+```
+
+---
+
+## 5. Mixed-effects modeling
+
+**Primary cohort:** high grip (40% MVC) only. Trial-level logistic GLMMs with random intercepts for `subject_id`:
+
+- **Baseline:** `resp_is_correct ~ task_modality + stim_level_index + (1 | subject_id)`
+- **DSP-augmented:** adds z-scored `pow_05_3hz` and `pow_8_12hz`
+
+Low-grip trials are fitted identically as a comparison arm (see stratified tremor table in `02_cognitive_motor_model.qmd`).
+
+```{r}
+#| label: fx-table
+
+fx_tbl %>%
+  rename(`OR (95% CI)` = OR..95..CI.) %>%
+  gt(groupname_col = "Model") %>%
+  tab_header(
+    title = "Fixed effects — high grip (40% MVC)",
+    subtitle = "Odds ratios (95% CI) from mixed-effects logistic regression"
+  ) %>%
+  cols_label(
+    Predictor = "Predictor",
+    `OR (95% CI)` = "OR (95% CI)",
+    p = "p"
+  ) %>%
+  tab_options(table.font.size = px(12))
+```
+
+**Interpretation:** Under physical load (40% MVC), tremor-band power trends negative (more tremor → lower accuracy). The pooled model that included both grip conditions was misleading — the significant positive tremor effect was driven by low-grip precision noise, not load-induced interference.
+
+---
+
+## 6. Feature summaries
+
+```{r}
+#| label: feature-summary
+
+model_tbl %>%
+  filter(!is.na(pow_05_3hz), !is.na(pow_8_12hz)) %>%
+  summarise(
+    trials = n(),
+    `rms_error (mean)` = mean(rms_error, na.rm = TRUE),
+    `pow_0.5-3Hz (median)` = median(pow_05_3hz, na.rm = TRUE),
+    `pow_8-12Hz (median)` = median(pow_8_12hz, na.rm = TRUE),
+    accuracy = mean(tolower(as.character(resp_is_correct)) == "true", na.rm = TRUE)
+  ) %>%
+  gt() %>%
+  fmt_number(columns = c(`rms_error (mean)`, `pow_0.5-3Hz (median)`, `pow_8-12Hz (median)`), decimals = 4) %>%
+  fmt_percent(columns = accuracy, decimals = 1) %>%
+  tab_header(title = "Analysis-set feature summaries")
+```
+
+---
+
+## 7. Additional Analyses
+
+### 7a. Population Mean PSD
+
+```{r}
+#| label: fig-psd-ribbon
+#| fig-cap: "Grand-average Welch PSD ± SE by grip condition. Low grip (5% MVC) shows dramatically elevated tremor-band power (8–12 Hz), confirming inadequate motor control under a near-zero target. High grip (40% MVC) suppresses the tremor band."
+
+knitr::include_graphics(file.path(fig_dir, "hero_psd_ribbon.png"))
+```
+
+### 7b. Individual Differences: Load Cost Caterpillar
+
+```{r}
+#| label: fig-caterpillar-interactive
+
+suppressPackageStartupMessages({
+  library(ggplot2); library(dplyr); library(scales)
+})
+has_plotly_local <- requireNamespace("plotly", quietly = TRUE) &&
+  requireNamespace("htmlwidgets", quietly = TRUE)
+if (has_plotly_local) suppressPackageStartupMessages(library(plotly))
+
+subj_sum <- read.csv(file.path(repo, "reports", "subject_level_summary.csv"))
+subj_sum <- subj_sum[order(subj_sum$load_cost, na.last = TRUE), ]
+subj_sum <- subj_sum[!is.na(subj_sum$load_cost), ]
+subj_sum$subject_ord <- seq_len(nrow(subj_sum))
+subj_sum$direction   <- ifelse(subj_sum$load_cost > 0, "Hindered by load", "Facilitated by load")
+subj_sum$hover_text  <- sprintf(
+  "%s<br>Load cost: %+.1f%%<br>High acc: %.1f%%  Low acc: %.1f%%",
+  subj_sum$subject_id,
+  subj_sum$load_cost * 100,
+  subj_sum$high_acc * 100,
+  subj_sum$low_acc  * 100
+)
+
+p_cat_interactive <- ggplot(subj_sum, aes(
+    x = subject_ord, y = load_cost,
+    colour = direction, text = hover_text
+  )) +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
+  geom_segment(aes(xend = subject_ord, yend = 0), linewidth = 0.5, alpha = 0.4) +
+  geom_point(size = 2.5) +
+  scale_colour_manual(values = load_effect_colors[c("Hindered by load", "Facilitated by load")], name = NULL) +
+  scale_y_continuous(labels = scales::label_percent(accuracy = 1)) +
+  labs(
+    x = "Subject (ranked by load cost)",
+    y = "Accuracy drop under 40% MVC",
+    title = "Individual Differences in Cognitive Load Cost"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(),
+        legend.position = "top")
+
+if (has_plotly_local) {
+  plotly::ggplotly(p_cat_interactive, tooltip = "text") |>
+    plotly::layout(hoverlabel = list(bgcolor = "white", font = list(size = 12)))
+} else {
+  p_cat_interactive
+}
+```
+
+### 7c. Speed–Accuracy Trade-off Under Load
+
+```{r}
+#| label: fig-sat-interactive
+
+suppressPackageStartupMessages({
+  library(ggplot2); library(dplyr); library(tidyr); library(scales)
+})
+has_plotly_local2 <- requireNamespace("plotly", quietly = TRUE)
+if (has_plotly_local2) suppressPackageStartupMessages(library(plotly))
+
+m <- if (exists("model_tbl")) model_tbl else read.csv(
+  file.path(repo, "reports", "analysis_trial_table.csv"), stringsAsFactors = FALSE
+)
+m_sat <- m[!is.na(m$same_diff_resp_secs) & m$same_diff_resp_secs > 0.1 & m$same_diff_resp_secs < 5, ]
+m_sat$resp_rt_ms <- m_sat$same_diff_resp_secs * 1000
+m_sat$is_correct_int <- as.integer(m_sat$resp_is_correct %in% c(TRUE, "True", "TRUE", 1))
+m_sat$grip_label <- ifelse(
+  m_sat$is_high_grip %in% c(TRUE, "True", "TRUE", 1),
+  "High (40% MVC)", "Low (5% MVC)"
+)
+
+sat_df <- m_sat |>
+  dplyr::group_by(subject_id, grip_label) |>
+  dplyr::summarise(
+    med_rt = median(resp_rt_ms, na.rm = TRUE),
+    acc    = mean(is_correct_int, na.rm = TRUE),
+    n      = dplyr::n(),
+    .groups = "drop"
+  ) |>
+  dplyr::mutate(hover_text = sprintf(
+    "%s<br>%s<br>RT: %.0f ms<br>Acc: %.1f%%<br>N trials: %d",
+    subject_id, grip_label, med_rt, acc * 100, n
+  ))
+
+# Pivot only plot columns — leaving `n` out of values_from splits each subject
+# into two rows (high-n vs low-n), collapsing 65 paired subjects down to ~11.
+sat_wide <- sat_df |>
+  dplyr::select(subject_id, grip_label, med_rt, acc, hover_text) |>
+  tidyr::pivot_wider(
+    names_from = grip_label,
+    values_from = c(med_rt, acc, hover_text)
+  )
+has_both_sat <- sat_wide[
+  !is.na(sat_wide[["med_rt_High (40% MVC)"]]) &
+  !is.na(sat_wide[["med_rt_Low (5% MVC)"]]),
+  "subject_id", drop = TRUE
+]
+sat_paired <- sat_df[sat_df$subject_id %in% has_both_sat, ]
+
+p_sat_interactive <- ggplot(sat_paired,
+    aes(x = med_rt, y = acc, colour = grip_label,
+        group = subject_id, text = hover_text)) +
+  geom_line(colour = "grey80", linewidth = 0.4, alpha = 0.7) +
+  geom_point(size = 2.5, alpha = 0.85) +
+  scale_colour_manual(values = grip_scale_colors, name = "Grip effort") +
+  scale_y_continuous(labels = scales::label_percent(accuracy = 1),
+                     limits = c(0.35, 1.0)) +
+  labs(
+    x = "Median response time (ms)", y = "Perceptual accuracy",
+    title = "Speed–Accuracy Trade-off by Grip Condition"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "top")
+
+if (has_plotly_local2) {
+  plotly::ggplotly(p_sat_interactive, tooltip = "text") |>
+    plotly::layout(hoverlabel = list(bgcolor = "white", font = list(size = 12)))
+} else {
+  p_sat_interactive
+}
+```
+
+### 7d. LC Brain–Behavior Relationship (Bootstrap Validated)
+
+The BAP dataset includes MRI-derived Locus Coeruleus integrity metrics (Bennett et al., *Sci. Rep.* 2024) for **N = 55** subjects. A 5,000-resample bootstrap confirms the direction and magnitude of the LC fICVF–tremor relationship:
+
+| Comparison | r | 95% BCa CI | Direction support |
+|---|---|---|---|
+| LC fICVF × Δ tremor (high − low) | **−0.186** | [−0.375, +0.073] | 94.9% of resamples < 0 |
+| LC CNR × Δ tremor | −0.037 | [−0.219, +0.127] | 67.0% of resamples < 0 |
+| LC fICVF × load cost (accuracy) | −0.116 | [−0.375, +0.179] | 80.3% of resamples < 0 |
+
+**Honest interpretation:** The 95% CI for the fICVF–tremor relationship just crosses zero, so this does not meet conventional significance criteria. However, 94.9% directional consistency across 5,000 resamples, paired with the theoretical LC-NE arousal mechanism, supports a *trend* worth replication in a larger sample. The CNR (neuromelanin contrast) metric shows near-chance directional support — consistent with Bennett et al.'s finding that MTC is most sensitive to extreme age-group differences, not within-group performance variation.
+
+*Full scatterplots and bootstrap histogram in `02_cognitive_motor_model.qmd`.*
+
+### 7e. Out-of-Sample ML Predictability
+
+GroupKFold (leave-one-subject-out) cross-validation on high-grip trials (*N* = 65 subjects):
+
+| Feature set | Model | AUC |
+|-------------|-------|-----|
+| Difficulty only | Random Forest | 0.850 |
+| + DSP (rms, tracking, tremor) | Random Forest | **0.855** |
+| Difficulty only | Logistic | 0.617 |
+| + DSP | Logistic | **0.628** |
+
+Task difficulty (`stim_level_index`) dominates. Grip-force DSP features add ~0.5% AUC — a real but modest independent contribution. The incremental lift is scientifically informative: grip instability carries signal about perceptual outcome *beyond* the nominal task design.
+
+### 7f. SHAP Explainability: Which Features Drive Predictions?
+
+```{r}
+#| label: fig-shap-importance
+#| fig-cap: "Global SHAP importance (Random Forest, N = 13,582 trials). Task difficulty explains 88% of variance; among continuous biometric DSP features, physiological tremor (8–12 Hz) is the single largest contributor."
+
+knitr::include_graphics(file.path(fig_dir, "hero_shap_importance.png"))
+```
+
+```{r}
+#| label: fig-shap-interaction
+#| fig-cap: "Mean SHAP value for tremor by difficulty level. The tremor effect reverses sign at maximum difficulty (level 4) — consistent with the direction-flip story and precision-noise at near-chance trials."
+
+knitr::include_graphics(file.path(fig_dir, "hero_shap_tremor_by_difficulty.png"))
+```
+
+> **Honest headline:** Task difficulty governs accuracy; physiological tremor (8–12 Hz) is the **strongest DSP contributor** but accounts for ~3.4% of total SHAP importance. The value of the dynamometer lies in adding an *independent* continuous signal stream — not in replacing the task design.
+
+### 7g. Temporal Window Analysis: Stimulus-Period Tremor Elevation
+
+Window analysis on visual trials (*N* = 1,426 trials, 62 subjects, difficulty levels 3–4). Mixed model: `log(tremor) ~ Window × Difficulty + (1 | subject_id)`.
+
+**Probe timing note:** Visual probe onsets (`stim_offset`) range from 0 to 0.48 s into the trial epoch. The pre-window (probe − 1.5 s to probe − 0.1 s) therefore falls mostly before the trial epoch for probes at 0–0.24 s; only trials with `probe_onset_s = 0.48 s` achieve 39% pre-window validity. The "pre" window is better interpreted as **trial-onset baseline** and "post" as **stimulus-display period**. The significant Window × Difficulty interaction (β = +19.4, *t* = 4.1, *p* < 0.001) is robust to this constraint.
+
+```{r}
+#| label: fig-windowed-model
+#| fig-cap: "Pre-window (trial-onset baseline) vs. post-window (stimulus period) log tremor power by difficulty. Window × Difficulty interaction β = +19.4, t = 4.1, p < 0.001. Tremor during the stimulus display window is elevated exclusively at maximum difficulty — the motor system is destabilised by peak cognitive demand, not by the trial itself."
+
+knitr::include_graphics(file.path(fig_dir, "hero_windowed_tremor_model.png"))
+```
+
+**Probe alignment validation:** Windows are constructed dynamically per trial using each trial's unique `probe_onset_s`. The table below confirms post-window coverage is ≥98% across all probe-onset levels; pre-window coverage is limited to the latest-onset probe group (0.48 s).
+
+```{r}
+#| label: probe-validation-table
+
+probe_val <- read.csv(file.path(repo,"reports","probe_window_validation.csv"))
+probe_val$pre_window_range <- sprintf("%.2f to %.2f s", probe_val$probe_onset_s - 1.5, probe_val$probe_onset_s - 0.1)
+probe_val$post_window_range <- sprintf("%.2f to %.2f s", probe_val$probe_onset_s + 0.1, probe_val$probe_onset_s + 1.5)
+knitr::kable(probe_val[,c("probe_onset_s","n_trials","pre_window_range","pct_pre_valid","post_window_range","pct_post_valid")],
+  col.names = c("Probe onset (s)", "N trials", "Pre window", "Pre valid", "Post window", "Post valid"),
+  caption = "Per-probe-onset window coverage. Post-window ≥98% valid across all groups.")
+```
+
+### 7h. Applied Human Factors & Adaptive UI Implications
+
+The full pipeline — 100 Hz grip telemetry → target-normalized DSP → physiological tremor band power — maps cleanly onto production wearable and interactive systems. Below is a concrete engineering framework:
+
+**Signal chain in production:**
+
+```
+Raw grip sensor stream (100 Hz)
+  → Target-normalized error: (force − target) / target
+  → Zero-phase 0.5 Hz high-pass (remove postural drift)
+  → Rolling 256-sample Welch PSD (2.56 s window, 50% overlap)
+  → Extract 8–12 Hz band power per epoch
+  → Compare to subject's baseline tremor distribution (σ-threshold)
+  → Trigger adaptive UI response if power > μ + 2σ
+```
+
+**Application domains:**
+
+| Platform | Tremor signal source | Adaptive response |
+|---|---|---|
+| **AR/VR spatial interface** | Hand controller / glove accelerometer | Expand spatial hit-target radius; apply input smoothing |
+| **Gaming controller** | Grip force sensor (existing in high-end controllers) | Reduce aiming sensitivity; trigger aim-assist |
+| **Flight deck / surgical robot** | Haptic handle load cell | Increase stability augmentation gain; alert crew |
+| **Rehabilitation wearable** | Forearm EMG or grip dynamometer | Modulate task difficulty in real time; log fatigue trajectory |
+
+**Individualized threshold logic:** Because between-subject tremor baseline varies substantially (our caterpillar plot shows the load cost ranges from −20% to +30% across subjects), production systems should calibrate a **per-user tremor baseline** during a 30-second rest-hold epoch before each session. Deviation from that baseline, not the absolute power level, is the meaningful signal.
+
+**Privacy note:** All subject identifiers in this analysis are anonymized BAP codes; the pipeline operates on force-magnitude features only and requires no biometric identity to function.
+
+---
+
+## 8. Limitations & next steps
+
+1. **Temporal window constraint** — visual probe onsets are 0–0.48 s into the trial epoch; the pre-probe window (probe − 1.5 s) falls outside the epoch for most trials. The §7g comparison is better interpreted as trial-onset vs. stimulus-period tremor. True pre/post cognitive shock separation requires longer pre-stimulus baselines.
+2. **LC bootstrap CI crosses zero** — LC fICVF × Δ tremor: r = −0.186, 95% BCa CI [−0.375, +0.073]. Directionally consistent (94.9% of resamples negative) but not conventionally significant. N ≈ 55 is underpowered for moderate-sized brain-behavior correlations; replication in the full BAP cohort is needed.
+3. **File attrition (post re-download)** — **78.1%** of retainable behavioral trials reach the analysis set (13,759 / 17,621). Residual loss: **0.7%** no grip files (BAP172 aud only), **20.9%** partial grip coverage, **3.8%** feature extraction.
+4. **Grip stratification required** — pooled tremor effects flip sign across grip conditions; primary inference is high-grip only.
+5. **DSP lift is incremental** — grip-force features add ~0.5% AUC over task difficulty alone (GroupKFold RF, high-grip trials). The independent signal is real but modest; the primary value is continuous state monitoring, not replacing task-design signals.
+
+**Reproducibility:** Source modules — `01_ingest.qmd` (Python DSP), `02_cognitive_motor_model.qmd` (R GLMM), `03_hero_visuals.qmd` (R figures).
+
+---
+
+*Generated as a single self-contained HTML for portfolio review.*
+
+**Export one file for LLM upload:**
+
+```bash
+quarto render analysis/portfolio.qmd
+cp _site/analysis/portfolio.html portfolio_case_study.html
+```
+
+Open `portfolio_case_study.html` at the repo root — all figures are embedded (no external dependencies).

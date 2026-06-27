@@ -1,0 +1,1348 @@
+---
+title: "BAP Gripforce — Hero Visualizations"
+author: "Mohd Dastgheib"
+format:
+  html:
+    toc: true
+    code-tools: true
+    code-fold: true
+    code-summary: "View the underlying logic"
+    theme: cosmo
+    fig-width: 9
+    fig-height: 10
+execute:
+  warning: false
+  message: false
+fig-format: png
+fig-dpi: 180
+---
+
+## Overview
+
+Portfolio-grade figures for quantitative UX / human-factors audiences:
+
+1. **Single-trial signal chain** — time domain (force → error → instability) **+ Welch PSD** with tracking/tremor bands highlighted.
+2. **Probe-locked spectrogram** — time × frequency heatmap aligned to oddball onset (*t* = 0 at probe).
+3. **Population spectral fingerprint** — band-power distributions by grip effort and accuracy.
+4. **Behavioral lift** — adjusted accuracy as a function of tremor-band power, split by grip effort.
+
+Inputs: `reports/analysis_trial_table.csv` plus raw grip CSVs via `config/paths.local.yaml`. Welch PSD for the hero trial is computed in Python (`scripts/export_hero_psd.py`) to match the ingest pipeline exactly.
+
+```{r}
+#| label: install-packages
+#| eval: false
+
+install.packages(c(
+  "ggplot2", "patchwork", "ggtext", "dplyr", "tidyr",
+  "scales", "lme4", "yaml", "stringr", "plotly", "htmlwidgets"
+))
+```
+
+```{r}
+#| label: setup
+
+suppressPackageStartupMessages({
+  library(ggplot2)
+  library(patchwork)
+  library(ggtext)
+  library(dplyr)
+  library(tidyr)
+  library(scales)
+  library(lme4)
+  library(yaml)
+  library(stringr)
+})
+
+has_plotly <- requireNamespace("plotly", quietly = TRUE) &&
+  requireNamespace("htmlwidgets", quietly = TRUE)
+
+repo <- normalizePath("..", winslash = "/", mustWork = TRUE)
+if (!file.exists(file.path(repo, "reports", "analysis_trial_table.csv"))) {
+  repo <- normalizePath(".", winslash = "/", mustWork = TRUE)
+}
+
+config_path <- file.path(repo, "config", "paths.local.yaml")
+if (!file.exists(config_path)) {
+  config_path <- file.path(repo, "config", "paths.example.yaml")
+}
+paths <- read_yaml(config_path)
+grip_root <- paths[["gripforce_root"]]
+model_path <- file.path(repo, "reports", "analysis_trial_table.csv")
+fig_dir <- file.path(repo, "reports", "figures")
+dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
+
+source(file.path(repo, "R", "colors_manuscript.R"))
+okabe <- grip_level_colors[c("Low effort", "High effort")]
+grip_colors <- grip_level_colors[c("Low grip (5% MVC)", "High grip (40% MVC)")]
+flip_colors <- grip_level_colors[c("Low grip\n(5% MVC)", "High grip\n(40% MVC)")]
+grip_scale_colors <- grip_level_colors[c("Low (5% MVC)", "High (40% MVC)")]
+
+fs_hz <- 100
+trial_epoch_s <- 2.94
+probe_window_s <- 0.15
+tracking_band <- c(0.5, 3.0)
+tremor_band <- c(8.0, 12.0)
+
+theme_hero <- function(base_size = 12) {
+  theme_minimal(base_size = base_size) +
+    theme(
+      panel.grid.minor = element_blank(),
+      panel.grid.major.x = element_blank(),
+      panel.grid.major.y = element_line(color = "grey90", linewidth = 0.35),
+      plot.title = element_markdown(face = "bold", size = rel(1.15), hjust = 0),
+      plot.subtitle = element_markdown(color = "grey35", size = rel(0.95), hjust = 0),
+      plot.caption = element_text(color = "grey45", size = rel(0.78), hjust = 0),
+      axis.title = element_text(color = "grey15", face = "plain"),
+      axis.text = element_text(color = "grey25"),
+      legend.position = "top",
+      legend.title = element_blank(),
+      plot.margin = margin(12, 16, 12, 12)
+    )
+}
+
+probe_onset_s <- function(meta_row) {
+  if ("probe_onset_s" %in% names(meta_row)) meta_row$probe_onset_s else meta_row$stim_offset
+}
+
+band_rect <- function(fmin, fmax, fill, alpha = 0.22) {
+  annotate("rect", xmin = fmin, xmax = fmax, ymin = -Inf, ymax = Inf, fill = fill, alpha = alpha)
+}
+probe_rect <- function(stim_onset_s, width_s = probe_window_s) {
+  annotate(
+    "rect",
+    xmin = stim_onset_s,
+    xmax = stim_onset_s + width_s,
+    ymin = -Inf,
+    ymax = Inf,
+    fill = signal_colors["probe_marker"],
+    alpha = 0.18
+  )
+}
+
+# (band_rect defined above)
+
+panel_tag <- function(label) {
+  annotate(
+    "text",
+    x = -Inf, y = Inf,
+    label = label,
+    hjust = -0.15, vjust = 1.35,
+    fontface = "bold",
+    size = 4.2,
+    color = "grey20"
+  )
+}
+
+rolling_var <- function(x, window = 31) {
+  n <- length(x)
+  half <- window %/% 2
+  vapply(seq_len(n), function(i) {
+    lo <- max(1L, i - half)
+    hi <- min(n, i + half)
+    stats::var(x[lo:hi], na.rm = TRUE)
+  }, numeric(1))
+}
+
+find_grip_file <- function(subject_id, session_num, run_num, task, root) {
+  pattern <- sprintf(
+    "subject%s_%s_session%s_run%s_.*_gripforce\\.csv",
+    subject_id, task, session_num, run_num
+  )
+  hits <- list.files(root, pattern = pattern, full.names = TRUE, recursive = TRUE)
+  if (length(hits) == 0) {
+    stop("No gripforce file found for ", subject_id, " ", task, " session ", session_num)
+  }
+  hits[[1]]
+}
+
+load_trial_trace <- function(
+    subject_id,
+    session_num,
+    run_num,
+    trial_idx,
+    task,
+    mvc,
+    grip_targ_prop_mvc,
+    stim_offset_s,
+    root = grip_root,
+    fs = fs_hz,
+    min_rows_per_trial = 100) {
+  path <- find_grip_file(subject_id, session_num, run_num, task, root)
+  raw <- read.csv(
+    path,
+    header = FALSE,
+    col.names = c("marker", "elapsed_time", "abs_time", "raw_force")
+  )
+
+  task_upper <- toupper(task)
+  raw$grip_force_au <- if (task_upper %in% c("AODDBALL", "VODDBALL")) {
+    raw$marker
+  } else {
+    raw$raw_force
+  }
+
+  raw$epoch_idx <- cumsum(c(1, diff(raw$elapsed_time) < 0))
+  counts <- raw %>%
+    count(epoch_idx, name = "n_rows")
+  keep_epochs <- counts %>%
+    filter(n_rows >= min_rows_per_trial) %>%
+    arrange(epoch_idx) %>%
+    mutate(trial_idx = row_number())
+
+  trial <- raw %>%
+    inner_join(keep_epochs %>% select(epoch_idx, trial_idx), by = "epoch_idx") %>%
+    filter(trial_idx == !!trial_idx) %>%
+    arrange(elapsed_time)
+
+  if (nrow(trial) < 50) {
+    stop(
+      "Trial ", trial_idx, " in ", basename(path),
+      " has too few samples after segmentation (", nrow(trial), ")."
+    )
+  }
+
+  trial$t_rel_s <- trial$elapsed_time - trial$elapsed_time[1]
+  target_force <- grip_targ_prop_mvc * mvc
+  trial$target_force <- target_force
+  trial$normalized_error <- (trial$grip_force_au - target_force) / target_force
+  trial$rolling_var <- rolling_var(trial$normalized_error, window = 31)
+  trial$stim_onset_s <- stim_offset_s
+
+  trial
+}
+```
+
+## Visual 1 — Single-trial anatomy (time domain)
+
+```{r}
+#| label: visual-1-data
+
+model_tbl <- read.csv(model_path, stringsAsFactors = FALSE)
+
+hero_meta <- model_tbl %>%
+  filter(
+    task_modality == "vis",
+    tolower(as.character(is_high_grip)) == "true",
+    tolower(as.character(resp_is_correct)) == "false",
+    !is.na(pow_8_12hz)
+  ) %>%
+  arrange(desc(pow_8_12hz)) %>%
+  slice(1)
+
+trace <- load_trial_trace(
+  subject_id = hero_meta$subject_id,
+  session_num = hero_meta$session_num,
+  run_num = hero_meta$run_num,
+  trial_idx = hero_meta$trial_idx,
+  task = hero_meta$task,
+  mvc = hero_meta$mvc,
+  grip_targ_prop_mvc = hero_meta$grip_targ_prop_mvc,
+  stim_offset_s = hero_meta$probe_onset_s   # seconds into trial; NOT stim_offset for aud
+)
+
+trace_label <- sprintf(
+  "%s · %s · session %s · trial %s · incorrect response",
+  hero_meta$subject_id,
+  hero_meta$task_modality,
+  hero_meta$session_num,
+  hero_meta$trial_idx
+)
+
+hero_onset <- probe_onset_s(hero_meta)
+
+# Export hero metadata for Python PSD computation (matches ingest pipeline)
+hero_meta_path <- file.path(fig_dir, "_hero_meta.csv")
+hero_psd_path <- file.path(fig_dir, "_hero_psd.csv")
+write.csv(hero_meta, hero_meta_path, row.names = FALSE)
+
+py_script <- file.path(repo, "scripts", "export_hero_psd.py")
+py_cmd <- sprintf(
+  "python3 %s %s %s",
+  shQuote(py_script),
+  shQuote(hero_meta_path),
+  shQuote(hero_psd_path)
+)
+py_status <- system(py_cmd, intern = FALSE)
+if (py_status != 0) {
+  stop("Python PSD export failed. Run from repo root with python3 + scipy available.")
+}
+
+hero_psd <- read.csv(hero_psd_path)
+hero_psd_log <- hero_psd %>%
+  filter(freq_hz > 0) %>%
+  mutate(psd_log10 = log10(pmax(psd, .Machine$double.xmin)))
+
+hero_spec_path <- file.path(fig_dir, "_hero_spectrogram.csv")
+hero_spec <- read.csv(hero_spec_path) %>%
+  filter(freq_hz <= 20, power > 0) %>%
+  mutate(power_db = 10 * log10(power))
+
+trace_probe <- trace %>%
+  mutate(t_from_probe = t_rel_s - hero_onset)
+```
+
+```{r}
+#| label: visual-1-anatomy
+#| fig-cap: "Single-trial signal chain: time domain (A–C) and Welch PSD (D) with DSP bands highlighted."
+
+p_force <- ggplot(trace, aes(x = t_rel_s, y = grip_force_au)) +
+  geom_line(color = signal_colors["force"], linewidth = 0.75) +
+  geom_hline(
+    yintercept = hero_meta$grip_targ_prop_mvc * hero_meta$mvc,
+    linetype = "dashed",
+    color = reference_line_color,
+    linewidth = 0.45
+  ) +
+  probe_rect(hero_onset) +
+  panel_tag("A") +
+  scale_x_continuous(limits = c(0, trial_epoch_s), expand = c(0, 0)) +
+  labs(x = NULL, y = "Grip force (a.u.)") +
+  theme_hero()
+
+p_error <- ggplot(trace, aes(x = t_rel_s, y = normalized_error)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = reference_line_color, linewidth = 0.45) +
+  geom_line(color = signal_colors["error"], linewidth = 0.75) +
+  probe_rect(hero_onset) +
+  panel_tag("B") +
+  scale_x_continuous(limits = c(0, trial_epoch_s), expand = c(0, 0)) +
+  labs(x = NULL, y = "Normalized error") +
+  theme_hero()
+
+p_instability <- ggplot(trace, aes(x = t_rel_s, y = rolling_var)) +
+  geom_line(color = signal_colors["instability"], linewidth = 0.8) +
+  probe_rect(hero_onset) +
+  panel_tag("C") +
+  scale_x_continuous(limits = c(0, trial_epoch_s), expand = c(0, 0)) +
+  scale_y_continuous(labels = label_number(accuracy = 0.001)) +
+  labs(x = "Time within trial (s)", y = "Rolling variance") +
+  theme_hero()
+
+p_psd <- ggplot(hero_psd_log, aes(x = freq_hz, y = psd_log10)) +
+  band_rect(tracking_band[1], tracking_band[2], band_colors[[1]]) +
+  band_rect(tremor_band[1], tremor_band[2], band_colors[[2]]) +
+  geom_vline(xintercept = c(tracking_band, tremor_band), color = "grey70", linewidth = 0.3, linetype = "dotted") +
+  geom_line(color = signal_colors["psd"], linewidth = 0.85) +
+  panel_tag("D") +
+  scale_x_continuous(limits = c(0, 20), breaks = seq(0, 20, 5), expand = c(0, 0)) +
+  labs(
+    x = "Frequency (Hz)",
+    y = expression(log[10] ~ PSD)
+  ) +
+  annotate(
+    "text",
+    x = 1.5, y = max(hero_psd_log$psd_log10) * 0.95,
+    label = "Tracking\n0.5–3 Hz",
+    color = band_colors[[1]], size = 3.2, fontface = "bold", hjust = 0
+  ) +
+  annotate(
+    "text",
+    x = 10, y = max(hero_psd_log$psd_log10) * 0.95,
+    label = "Tremor\n8–12 Hz",
+    color = band_colors[[2]], size = 3.2, fontface = "bold", hjust = 0
+  ) +
+  theme_hero()
+
+fig_anatomy <- (p_force / p_error / p_instability) | p_psd +
+  plot_layout(widths = c(1.2, 1)) +
+  plot_annotation(
+    title = "Representative Trial: From Grip Force to Spectral Decomposition",
+    subtitle = paste0(
+      trace_label,
+      " (representative trial; not inferential).",
+      "<br>Time panels: probe onset at *t* = ",
+      format(hero_onset, nsmall = 2),
+      " s (orange band). **D**: Welch PSD after target-normalization, detrend, and 0.5 Hz zero-phase high-pass."
+    ),
+    theme = theme(
+      plot.title = element_markdown(face = "bold", size = 16, hjust = 0),
+      plot.subtitle = element_markdown(size = 10.5, color = "grey35", hjust = 0)
+    )
+  )
+
+fig_anatomy
+```
+
+```{r}
+#| label: visual-1-anatomy-interactive
+#| eval: !expr 'has_plotly && knitr::is_html_output()'
+
+if (has_plotly) {
+  plotly::subplot(
+    plotly::ggplotly(p_force, tooltip = "text") %>%
+      plotly::layout(hovermode = "x unified"),
+    plotly::ggplotly(p_error, tooltip = "text") %>%
+      plotly::layout(hovermode = "x unified"),
+    plotly::ggplotly(p_instability, tooltip = "text") %>%
+      plotly::layout(hovermode = "x unified"),
+    nrows = 3,
+    shareX = TRUE,
+    titleY = TRUE
+  ) %>%
+    plotly::layout(
+      title = list(
+        text = paste0(
+          "Single-Trial Grip Dynamics During Perceptual Decision<br>",
+          "<sup>", trace_label, " · hover to inspect time points</sup>"
+        ),
+        x = 0.01,
+        xanchor = "left"
+      ),
+      showlegend = FALSE
+    )
+}
+```
+
+```{r}
+#| label: save-visual-1
+#| include: false
+
+ggsave(
+  file.path(fig_dir, "hero_single_trial_anatomy.png"),
+  fig_anatomy,
+  width = 11,
+  height = 9,
+  dpi = 180,
+  bg = "white"
+)
+```
+
+## Visual 4 — Representative force trace and short-time spectrum
+
+Normalized error and time–frequency power from a representative trial epoch. Probe onset is marked at **t = 0 s** for reference; inferential features use the full trial epoch. Pre-probe window shaded; tracking and tremor bands highlighted.
+
+```{r}
+#| label: visual-4-specgram
+#| fig-cap: "Representative force trace and short-time spectrum from the analysis epoch (probe onset marked at t = 0)."
+
+pre_probe_fill <- signal_colors["pre_epoch"]
+
+p_probe_error <- ggplot(trace_probe, aes(x = t_from_probe, y = normalized_error)) +
+  annotate("rect", xmin = -Inf, xmax = 0, ymin = -Inf, ymax = Inf, fill = pre_probe_fill, alpha = 0.07) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = reference_line_color, linewidth = 0.4) +
+  geom_vline(xintercept = 0, color = signal_colors["probe_marker"], linewidth = 0.85) +
+  geom_line(color = signal_colors["error"], linewidth = 0.8) +
+  panel_tag("A") +
+  scale_x_continuous(limits = c(-0.25, 2.4), expand = c(0, 0)) +
+  labs(x = NULL, y = "Normalized error") +
+  theme_hero()
+
+db_limits <- quantile(hero_spec$power_db, c(0.05, 0.98), na.rm = TRUE)
+
+p_specgram <- ggplot(hero_spec, aes(x = time_from_probe_s, y = freq_hz, fill = power_db)) +
+  annotate("rect", xmin = -Inf, xmax = 0, ymin = -Inf, ymax = Inf, fill = pre_probe_fill, alpha = 0.18) +
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = tracking_band[1], ymax = tracking_band[2],
+           fill = band_colors[[1]], alpha = 0.12) +
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = tremor_band[1], ymax = tremor_band[2],
+           fill = band_colors[[2]], alpha = 0.12) +
+  geom_raster(interpolate = TRUE) +
+  geom_vline(xintercept = 0, color = "white", linewidth = 0.7, linetype = "dashed") +
+  panel_tag("B") +
+  scale_fill_viridis_c(
+    option = "magma",
+    name = "Power (dB)",
+    limits = db_limits,
+    oob = scales::squish
+  ) +
+  scale_x_continuous(limits = c(-0.25, 2.4), expand = c(0, 0)) +
+  scale_y_continuous(limits = c(0, 20), expand = c(0, 0), breaks = seq(0, 20, 5)) +
+  labs(
+    x = "Time from probe onset (s)",
+    y = "Frequency (Hz)"
+  ) +
+  theme_hero() +
+  theme(legend.key.height = unit(0.9, "cm"))
+
+fig_specgram <- p_probe_error / p_specgram +
+  plot_layout(heights = c(1, 2.4)) +
+  plot_annotation(
+    title = "Representative Force Trace and Short-Time Spectrum",
+    subtitle = paste0(
+      trace_label,
+      "<br>**A** = normalized force error; **B** = short-time spectrum (representative trial; not inferential). ",
+      "Vertical gold line = probe onset (*t* = 0; reference only). ",
+      "Green band = tracking (0.5–3 Hz); pink band = tremor (8–12 Hz)."
+    ),
+    theme = theme(
+      plot.title = element_markdown(face = "bold", size = 16, hjust = 0),
+      plot.subtitle = element_markdown(size = 10.5, color = "grey35", hjust = 0)
+    )
+  )
+
+fig_specgram
+```
+
+```{r}
+#| label: visual-4-specgram-interactive
+#| eval: !expr 'has_plotly && knitr::is_html_output()'
+
+if (has_plotly) {
+  plotly::ggplotly(p_specgram, tooltip = c("x", "y", "fill")) %>%
+    plotly::layout(
+      title = "Probe-locked spectrogram (hover to inspect frequency bursts)",
+      xaxis = list(title = "Time from probe onset (s)"),
+      yaxis = list(title = "Frequency (Hz)")
+    )
+}
+```
+
+```{r}
+#| label: save-visual-4
+#| include: false
+
+ggsave(
+  file.path(fig_dir, "hero_probe_locked_spectrogram.png"),
+  fig_specgram,
+  width = 10,
+  height = 7,
+  dpi = 180,
+  bg = "white"
+)
+```
+
+## Visual 2 — Population spectral fingerprint
+
+Trial-level band powers from the full analysis cohort, split by grip effort and perceptual outcome.
+
+```{r}
+#| label: visual-spectral-pop-data
+
+spec_dat <- model_tbl %>%
+  filter(
+    !is.na(pow_05_3hz), !is.na(pow_8_12hz), !is.na(resp_is_correct),
+    pow_05_3hz > 0, pow_8_12hz > 0
+  ) %>%
+  group_by(is_high_grip) %>%
+  mutate(pow_8_12hz_z = as.numeric(scale(pow_8_12hz))) %>%
+  ungroup() %>%
+  filter(abs(pow_8_12hz_z) <= 3.5) %>%   # match analysis exclusion
+  mutate(
+    grip_effort = ifelse(
+      tolower(as.character(is_high_grip)) == "true",
+      "High effort", "Low effort"
+    ),
+    outcome = ifelse(
+      tolower(as.character(resp_is_correct)) == "true",
+      "Correct", "Incorrect"
+    ),
+    grip_effort = factor(grip_effort, levels = c("Low effort", "High effort")),
+    outcome = factor(outcome, levels = c("Correct", "Incorrect")),
+    log_tracking = log10(pow_05_3hz),
+    log_tremor = log10(pow_8_12hz)
+  )
+
+spec_long <- spec_dat %>%
+  select(grip_effort, outcome, log_tracking, log_tremor) %>%
+  pivot_longer(
+    cols = c(log_tracking, log_tremor),
+    names_to = "band",
+    values_to = "log_power"
+  ) %>%
+  mutate(
+    band = recode(
+      band,
+      log_tracking = "Tracking (0.5–3 Hz)",
+      log_tremor = "Tremor (8–12 Hz)"
+    )
+  )
+```
+
+```{r}
+#| label: visual-spectral-pop
+#| fig-cap: "Population distribution of log10 band power by grip effort and perceptual outcome."
+
+p_spec_violin <- ggplot(spec_long, aes(x = outcome, y = log_power, fill = outcome)) +
+  geom_violin(trim = FALSE, alpha = 0.35, color = NA) +
+  geom_boxplot(width = 0.14, outlier.size = 0.4, alpha = 0.85, color = "grey25") +
+  facet_grid(band ~ grip_effort, scales = "free_y") +
+  scale_fill_manual(values = outcome_colors) +
+  scale_y_continuous(limits = c(-7, 0), breaks = seq(-6, 0, 2)) +
+  labs(
+    title = "Trial-Level Band Power by Grip Condition and Perceptual Outcome",
+    subtitle = paste0(
+      "Analysis cohort (n = ",
+      format(nrow(spec_dat), big.mark = ","),
+      " trials with non-zero band power); distributions are descriptive, not inferential"
+    ),
+    x = NULL,
+    y = expression(log[10] ~ "band power"),
+    caption = "Tracking band = visuomotor control; tremor band = physiological instability. Powers from target-normalized, filtered Welch PSD."
+  ) +
+  theme_hero() +
+  theme(legend.position = "none", strip.text = element_text(face = "bold"))
+
+p_spec_violin
+```
+
+```{r}
+#| label: visual-spectral-scatter
+#| fig-cap: "Feature space: tracking vs tremor band power, colored by accuracy."
+
+p_spec_scatter <- ggplot(spec_dat, aes(x = log_tracking, y = log_tremor, color = outcome)) +
+  geom_point(alpha = 0.25, size = 1.2) +
+  geom_density2d(color = "grey55", linewidth = 0.4, bins = 5) +
+  facet_wrap(~ grip_effort) +
+  scale_color_manual(values = outcome_colors) +
+  scale_x_continuous(limits = c(-5, 0)) +
+  scale_y_continuous(limits = c(-6, -2)) +
+  labs(
+    title = "Two-Band Feature Space",
+    subtitle = "Each point is one trial; contours show density. Errors cluster toward higher tremor under load.",
+    x = expression(log[10] ~ "tracking power (0.5–3 Hz)"),
+    y = expression(log[10] ~ "tremor power (8–12 Hz)"),
+    color = "Outcome"
+  ) +
+  theme_hero()
+
+p_spec_scatter
+```
+
+```{r}
+#| label: save-visual-spectral
+#| include: false
+
+ggsave(
+  file.path(fig_dir, "hero_spectral_fingerprint.png"),
+  p_spec_violin,
+  width = 9,
+  height = 6,
+  dpi = 180,
+  bg = "white"
+)
+ggsave(
+  file.path(fig_dir, "hero_spectral_feature_space.png"),
+  p_spec_scatter,
+  width = 9,
+  height = 4.5,
+  dpi = 180,
+  bg = "white"
+)
+```
+
+## Visual 3 — Behavioral lift (DSP × effort)
+
+Adjusted marginal accuracy from a mixed model with tremor × grip interaction, controlling for modality and difficulty.
+
+```{r}
+#| label: visual-2-data
+
+viz_dat <- model_tbl %>%
+  filter(
+    !is.na(resp_is_correct),
+    !is.na(pow_8_12hz),
+    !is.na(pow_05_3hz)
+  ) %>%
+  mutate(
+    resp_is_correct = as.integer(tolower(as.character(resp_is_correct)) == "true"),
+    task_modality = factor(task_modality, levels = c("aud", "vis")),
+    stim_level_index = factor(stim_level_index, ordered = TRUE),
+    grip_effort = factor(
+      tolower(as.character(is_high_grip)) == "true",
+      levels = c(FALSE, TRUE),
+      labels = c("Low effort", "High effort")
+    ),
+    subject_id = factor(subject_id),
+    tremor_z = as.numeric(scale(pow_8_12hz))
+  ) %>%
+  # Exclude spectral outliers (|z| > 3.5): extreme values indicate recording artifacts
+  # that bypassed behavioral cleaning. These 28 high-grip trials (max z ≈ 48.5) have
+  # large leverage and are not plausible physiological tremor values.
+  filter(abs(tremor_z) <= 3.5)
+
+glmer_ctrl <- glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 2e5))
+
+m_lift <- glmer(
+  resp_is_correct ~ tremor_z * grip_effort + task_modality + stim_level_index +
+    (1 | subject_id),
+  data = viz_dat,
+  family = binomial(),
+  control = glmer_ctrl
+)
+
+tremor_grid <- seq(-2, 2, length.out = 60)
+pred_grid <- expand.grid(
+  tremor_z = tremor_grid,
+  grip_effort = levels(viz_dat$grip_effort),
+  task_modality = "vis",
+  stim_level_index = factor(2, levels = levels(viz_dat$stim_level_index), ordered = TRUE),
+  KEEP.OUT.ATTRS = FALSE,
+  stringsAsFactors = FALSE
+)
+pred_grid$grip_effort <- factor(pred_grid$grip_effort, levels = levels(viz_dat$grip_effort))
+pred_grid$task_modality <- factor(pred_grid$task_modality, levels = levels(viz_dat$task_modality))
+
+pred_grid$pred_acc <- predict(m_lift, newdata = pred_grid, type = "response", re.form = NA)
+
+# Empirical bins for overlay — use -Inf/Inf for outer edges so no trial lands in <NA>
+viz_bins <- viz_dat %>%
+  mutate(tremor_bin = cut(
+    tremor_z,
+    breaks = c(-Inf, -1.5, -0.5, 0.5, 1.5, Inf),
+    labels = c("< −1.5", "−1.5 to −0.5", "−0.5 to 0.5", "0.5 to 1.5", "> 1.5")
+  )) %>%
+  group_by(grip_effort, tremor_bin) %>%
+  summarise(
+    acc = mean(resp_is_correct),
+    se = sqrt(acc * (1 - acc) / n()),
+    # Cap display midpoint at ±2.5 so extreme-bin labels stay within the plot range
+    tremor_mid = pmin(pmax(mean(tremor_z), -2.5), 2.5),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  filter(n >= 25)
+```
+
+```{r}
+#| label: visual-2-lift
+#| fig-cap: "Population-level accuracy as a function of tremor-band power, split by grip effort."
+
+fig_lift <- ggplot() +
+  geom_line(
+    data = pred_grid,
+    aes(x = tremor_z, y = pred_acc, color = grip_effort, linewidth = grip_effort)
+  ) +
+  geom_pointrange(
+    data = viz_bins,
+    aes(x = tremor_mid, y = acc, ymin = pmax(acc - 1.96 * se, 0), ymax = pmin(acc + 1.96 * se, 1),
+        color = grip_effort),
+    linewidth = 0.35,
+    fatten = 2.2,
+    alpha = 0.85,
+    inherit.aes = FALSE
+  ) +
+  scale_color_manual(values = okabe) +
+  scale_linewidth_manual(values = c("Low effort" = 0.7, "High effort" = 1.1), guide = "none") +
+  scale_x_continuous(
+    breaks = seq(-2, 2, by = 1),
+    labels = function(x) ifelse(x > 0, paste0("+", x), as.character(x))
+  ) +
+  scale_y_continuous(
+    labels = label_percent(accuracy = 1),
+    limits = c(0.35, 0.85),
+    expand = expansion(mult = c(0.02, 0.02))
+  ) +
+  labs(
+    title = "Tremor-Band Power and Perceptual Accuracy by Grip Effort",
+    subtitle = "Marginal accuracy from mixed-effects model (modality + difficulty adjusted; population-level predictions)",
+    x = "Physiological tremor power, 8–12 Hz (within-condition z-score)",
+    y = "Predicted accuracy",
+    caption = paste0(
+      "Lines: fixed-effects predictions from tremor × grip interaction model (n = ",
+      format(nrow(viz_dat), big.mark = ","),
+      " trials; spectral outliers |z| > 3.5 excluded). Points: binned observed accuracy ± 95% CI (n ≥ 25 per bin)."
+    )
+  ) +
+  theme_hero() +
+  theme(legend.position = c(0.82, 0.88))
+
+fig_lift
+```
+
+```{r}
+#| label: visual-2-lift-interactive
+#| eval: !expr 'has_plotly && knitr::is_html_output()'
+
+if (has_plotly) {
+  plotly::ggplotly(fig_lift, tooltip = "text") %>%
+    plotly::layout(
+      hovermode = "closest",
+      legend = list(x = 0.72, y = 0.95)
+    )
+}
+```
+
+```{r}
+#| label: save-visual-2
+#| include: false
+
+ggsave(
+  file.path(fig_dir, "hero_tremor_accuracy_lift.png"),
+  fig_lift,
+  width = 9,
+  height = 5.5,
+  dpi = 180,
+  bg = "white"
+)
+```
+
+## Visual 5 — Grip compliance portrait
+
+High-grip (40% MVC) trials are valid for load-normalized spectral analysis only if participants actually *held* the target force. This figure shows per-subject force compliance (actual / target). One participant with a negative MVC recording is already excluded by NaN spectral features.
+
+```{r}
+#| label: visual-compliance-data
+
+is_high <- function(x) tolower(as.character(x)) == "true"
+
+compliance_dat <- model_tbl %>%
+  filter(
+    is_high(is_high_grip),
+    subject_id != "BAP196",
+    !is.na(pow_8_12hz),
+    mvc > 0
+  ) %>%
+  mutate(
+    target_force = grip_targ_prop_mvc * mvc,
+    compliance   = grip_force_mean_au / target_force
+  ) %>%
+  group_by(subject_id) %>%
+  summarise(
+    mean_compliance = mean(compliance, na.rm = TRUE),
+    sd_compliance   = sd(compliance, na.rm = TRUE),
+    n_trials        = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(mean_compliance) %>%
+  mutate(subject_rank = row_number())
+
+overall_mean <- mean(compliance_dat$mean_compliance, na.rm = TRUE)
+n_subj       <- nrow(compliance_dat)
+```
+
+```{r}
+#| label: visual-compliance
+#| fig-height: 5
+#| fig-cap: "Per-subject mean force compliance (actual / target) for high-grip (40% MVC) trials."
+
+p_compliance <- ggplot(compliance_dat, aes(x = subject_rank, y = mean_compliance)) +
+  geom_hline(yintercept = 1.0, linetype = "dashed", color = "grey60", linewidth = 0.5) +
+  geom_hline(yintercept = c(0.8, 1.2), linetype = "dotted", color = effort_colors["High"], linewidth = 0.4) +
+  geom_errorbar(
+    aes(ymin = mean_compliance - sd_compliance, ymax = mean_compliance + sd_compliance),
+    width = 0.3, color = "grey70", linewidth = 0.4
+  ) +
+  geom_point(aes(color = mean_compliance), size = 2.8) +
+  geom_hline(yintercept = overall_mean, color = effort_colors["Low"], linewidth = 0.7, linetype = "solid") +
+  annotate(
+    "text", x = n_subj * 0.85, y = overall_mean + 0.02,
+    label = sprintf("Mean = %.2f×", overall_mean),
+    color = effort_colors["Low"], size = 3.5, hjust = 0.5
+  ) +
+  scale_color_gradient2(
+    low = effort_colors["High"], mid = reference_line_color, high = task_colors["ADT"],
+    midpoint = 1.0,
+    guide = "none"
+  ) +
+  scale_y_continuous(
+    labels = function(x) sprintf("%.1fx", x),
+    limits = c(0.6, 1.4)
+  ) +
+  scale_x_continuous(breaks = NULL) +
+  labs(
+    title = "High-Grip Compliance: Participants Held 40% MVC with High Fidelity",
+    subtitle = sprintf(
+      "Each point = one subject (n = %d); error bars = ±1 SD across trials. Dashed red lines = ±20%% tolerance. Blue line = cohort mean.",
+      n_subj
+    ),
+    x = "Participants (ranked by compliance)",
+    y = "Force compliance (actual / target)",
+    caption = "All subjects within ±20% of target. One participant excluded due to a negative MVC recording (data entry error)."
+  ) +
+  theme_hero()
+
+p_compliance
+```
+
+```{r}
+#| label: save-visual-compliance
+#| include: false
+
+ggsave(
+  file.path(fig_dir, "hero_grip_compliance.png"),
+  p_compliance, width = 9, height = 5, dpi = 180, bg = "white"
+)
+```
+
+## Visual 6 — Psychometric drift under physical load
+
+How does carrying 40% MVC change the accuracy × difficulty curve? The load effect is not uniform — it hits hardest at intermediate stimulus levels where cognitive resources are most taxed.
+
+```{r}
+#| label: visual-psychometric-data
+
+psycho_dat <- model_tbl %>%
+  filter(!is.na(resp_is_diff), subject_id != "BAP196") %>%
+  mutate(
+    p_diff = as.integer(tolower(as.character(resp_is_diff)) == "true"),
+    grip_label = factor(
+      ifelse(is_high(is_high_grip), "High grip (40% MVC)", "Low grip (5% MVC)"),
+      levels = c("Low grip (5% MVC)", "High grip (40% MVC)")
+    ),
+    task_label = ifelse(task_modality == "vis", "Visual", "Auditory"),
+    stim_level = as.integer(as.character(stim_level_index))
+  ) %>%
+  group_by(grip_label, task_label, stim_level) %>%
+  summarise(
+    pd  = mean(p_diff, na.rm = TRUE),
+    se  = sqrt(pd * (1 - pd) / n()),
+    n   = n(),
+    .groups = "drop"
+  )
+```
+
+```{r}
+#| label: visual-psychometric
+#| fig-height: 5
+#| fig-cap: "Psychometric function: P('Different') rises monotonically with stimulus level; physical load compresses the curve."
+
+p_psycho <- ggplot(psycho_dat, aes(
+    x = stim_level, y = pd,
+    color = grip_label, group = grip_label
+  )) +
+  geom_ribbon(
+    aes(ymin = pmax(pd - 1.96 * se, 0), ymax = pmin(pd + 1.96 * se, 1), fill = grip_label),
+    alpha = 0.12, color = NA
+  ) +
+  geom_line(linewidth = 1.0) +
+  geom_point(size = 2.8) +
+  facet_wrap(~ task_label) +
+  scale_color_manual(values = grip_colors) +
+  scale_fill_manual(values = grip_colors, guide = "none") +
+  scale_y_continuous(
+    labels = label_percent(accuracy = 1),
+    limits = c(0, 1.02),
+    expand = c(0, 0),
+    breaks = seq(0, 1, 0.25)
+  ) +
+  scale_x_continuous(
+    breaks = 0:4,
+    labels = c("Δ0\n(catch)", "Δ1\n(weakest)", "Δ2", "Δ3", "Δ4\n(strongest)")
+  ) +
+  labs(
+    title = "Physical Load Compresses the Psychometric Function",
+    subtitle = "High grip (40% MVC) reduces detection sensitivity; gap largest at intermediate signal levels (Δ2)",
+    x = "Stimulus level",
+    y = "P('Different')",
+    caption = "Mean ± 95% CI. Δ0 = catch trial (no change); Δ4 = strongest signal. resp_is_diff column."
+  ) +
+  theme_hero() +
+  theme(legend.position = "top")
+
+p_psycho
+```
+
+```{r}
+#| label: save-visual-psychometric
+#| include: false
+
+ggsave(
+  file.path(fig_dir, "hero_psychometric_by_grip.png"),
+  p_psycho, width = 9, height = 5, dpi = 180, bg = "white"
+)
+```
+
+## Visual 7 — The direction flip: tremor under load
+
+The pooled tremor effect (both grip conditions) is misleading. Fit separate models to each condition and compare slopes. **High grip:** tremor trends negative — more instability, more errors (the interference prediction). **Low grip:** tremor trends positive — a precision-noise artifact of the near-zero 5% MVC target.
+
+```{r}
+#| label: visual-flip-data
+
+flip_base <- model_tbl %>%
+  filter(!is.na(resp_is_correct), !is.na(pow_8_12hz), !is.na(pow_05_3hz)) %>%
+  mutate(
+    resp = as.integer(tolower(as.character(resp_is_correct)) == "true"),
+    task_modality    = factor(task_modality, levels = c("aud", "vis")),
+    stim_level_index = factor(stim_level_index, ordered = TRUE),
+    subject_id       = factor(subject_id),
+    grip_label = factor(
+      ifelse(is_high(is_high_grip), "High grip (40% MVC)", "Low grip (5% MVC)"),
+      levels = c("High grip (40% MVC)", "Low grip (5% MVC)")
+    )
+  )
+
+# z-score tremor *within* each grip stratum, then exclude spectral outliers (|z| > 3.5)
+flip_high <- flip_base %>% filter(grip_label == "High grip (40% MVC)") %>%
+  mutate(tremor_z = as.numeric(scale(pow_8_12hz))) %>%
+  filter(abs(tremor_z) <= 3.5)
+flip_low  <- flip_base %>% filter(grip_label == "Low grip (5% MVC)") %>%
+  mutate(tremor_z = as.numeric(scale(pow_8_12hz))) %>%
+  filter(abs(tremor_z) <= 3.5)
+
+m_flip_high <- glmer(
+  resp ~ tremor_z + task_modality + stim_level_index + (1 | subject_id),
+  data = flip_high, family = binomial(), control = glmer_ctrl
+)
+m_flip_low <- glmer(
+  resp ~ tremor_z + task_modality + stim_level_index + (1 | subject_id),
+  data = flip_low, family = binomial(), control = glmer_ctrl
+)
+
+# Extract tremor OR + CI
+extract_tremor_or <- function(m, label) {
+  cf <- confint(m, parm = "tremor_z", method = "Wald")
+  est <- fixef(m)[["tremor_z"]]
+  data.frame(
+    Condition = label,
+    OR        = exp(est),
+    OR_low    = exp(cf[1]),
+    OR_high   = exp(cf[2]),
+    slope_log = est
+  )
+}
+
+tremor_or <- rbind(
+  extract_tremor_or(m_flip_high, "High grip\n(40% MVC)"),
+  extract_tremor_or(m_flip_low,  "Low grip\n(5% MVC)")
+)
+
+# Prediction grid for slope curves
+tgrid <- seq(-2.5, 2.5, length.out = 80)
+
+make_pred_curve <- function(m, dat, label) {
+  # Population-averaged: generate predictions over all observed condition combinations,
+  # then average so the y-intercept reflects the full cohort rather than one reference cell.
+  cond_grid <- expand.grid(
+    tremor_z         = tgrid,
+    task_modality    = levels(dat$task_modality),
+    stim_level_index = levels(dat$stim_level_index),
+    KEEP.OUT.ATTRS   = FALSE,
+    stringsAsFactors = FALSE
+  )
+  cond_grid$task_modality    <- factor(cond_grid$task_modality,    levels = levels(dat$task_modality))
+  cond_grid$stim_level_index <- factor(cond_grid$stim_level_index, levels = levels(dat$stim_level_index), ordered = TRUE)
+  cond_grid$pred_cell <- predict(m, newdata = cond_grid, type = "response", re.form = NA)
+
+  cond_grid %>%
+    group_by(tremor_z) %>%
+    summarise(pred = mean(pred_cell, na.rm = TRUE), .groups = "drop") %>%
+    mutate(label = label)
+}
+
+flip_curves <- rbind(
+  make_pred_curve(m_flip_high, flip_high, "High grip\n(40% MVC)"),
+  make_pred_curve(m_flip_low,  flip_low,  "Low grip\n(5% MVC)")
+)
+flip_curves$label <- factor(flip_curves$label,
+  levels = c("High grip\n(40% MVC)", "Low grip\n(5% MVC)"))
+
+# Empirical bins per grip — use -Inf/Inf outer edges so no trial lands in <NA>
+bin_flip <- function(dat, label) {
+  dat %>%
+    mutate(tbin = cut(tremor_z,
+                      breaks = c(-Inf, -1.5, -0.5, 0.5, 1.5, Inf),
+                      labels = c("< -1.5", "-1.5–-0.5", "-0.5–0.5", "0.5–1.5", "> 1.5"))) %>%
+    group_by(tbin) %>%
+    summarise(
+      acc  = mean(resp, na.rm = TRUE),
+      se   = sqrt(acc * (1 - acc) / n()),
+      tmid = pmin(pmax(mean(tremor_z, na.rm = TRUE), -2.5), 2.5),
+      n    = n(), .groups = "drop"
+    ) %>%
+    filter(n >= 20) %>%
+    mutate(label = label)
+}
+
+flip_bins <- rbind(
+  bin_flip(flip_high, "High grip\n(40% MVC)"),
+  bin_flip(flip_low,  "Low grip\n(5% MVC)")
+) %>%
+  mutate(label = factor(label, levels = c("High grip\n(40% MVC)", "Low grip\n(5% MVC)")))
+```
+
+```{r}
+#| label: visual-flip
+#| fig-height: 5.5
+#| fig-cap: "Tremor → accuracy slope for high vs low grip: opposite directions, same feature."
+
+# OR forest plot inset — axis limits from data (include OR=1 reference and full CIs)
+or_xlim <- range(c(tremor_or$OR_low, tremor_or$OR_high, tremor_or$OR, 1), na.rm = TRUE)
+or_xlim <- or_xlim + c(-1, 1) * 0.12 * diff(or_xlim)
+
+p_or <- ggplot(tremor_or, aes(x = OR, xmin = OR_low, xmax = OR_high, y = Condition, color = Condition)) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "grey55", linewidth = 0.5) +
+  geom_errorbarh(height = 0.2, linewidth = 0.8) +
+  geom_point(size = 4) +
+  scale_color_manual(values = flip_colors, guide = "none") +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 4)) +
+  coord_cartesian(xlim = or_xlim) +
+  labs(
+    title = "OR: Tremor → Accuracy",
+    x = "Odds ratio (95% Wald CI)",
+    y = NULL
+  ) +
+  theme_hero() +
+  theme(
+    panel.grid.major.x = element_line(color = "grey90", linewidth = 0.3),
+    panel.grid.major.y = element_blank()
+  )
+
+# Slope curves
+p_slopes <- ggplot() +
+  geom_line(
+    data = flip_curves,
+    aes(x = tremor_z, y = pred, color = label, linetype = label),
+    linewidth = 1.2
+  ) +
+  geom_pointrange(
+    data = flip_bins,
+    aes(
+      x = tmid, y = acc,
+      ymin = pmax(acc - 1.96 * se, 0), ymax = pmin(acc + 1.96 * se, 1),
+      color = label
+    ),
+    fatten = 2.5, linewidth = 0.4, alpha = 0.9, inherit.aes = FALSE
+  ) +
+  scale_color_manual(values = flip_colors, name = NULL) +
+  scale_linetype_manual(
+    values = c("High grip\n(40% MVC)" = "solid", "Low grip\n(5% MVC)" = "dashed"),
+    guide = "none"
+  ) +
+  scale_y_continuous(labels = label_percent(accuracy = 1), limits = c(0.3, 0.85)) +
+  scale_x_continuous(
+    breaks = -2:2,
+    labels = c("−2σ", "−1σ", "0", "+1σ", "+2σ")
+  ) +
+  labs(
+    x = "Physiological tremor power (within-condition z-score)",
+    y = "Predicted accuracy"
+  ) +
+  theme_hero() +
+  theme(legend.position = c(0.82, 0.88))
+
+fig_flip <- p_slopes + p_or +
+  plot_layout(widths = c(2.2, 1)) +
+  plot_annotation(
+    title = "Stratified Tremor–Accuracy Associations: High vs Low Grip",
+    subtitle = paste0(
+      "**Left:** population-level accuracy vs tremor (modality and difficulty covariates; predictions averaged across auditory/visual tasks and all stimulus levels). ",
+      "**Right:** odds-ratio forest plot.<br>",
+      "Both strata show small negative associations of similar sign and magnitude; ",
+      "tremor × grip interaction was not significant."
+    ),
+    theme = theme(
+      plot.title    = element_markdown(face = "bold", size = 15, hjust = 0),
+      plot.subtitle = element_markdown(size = 10, color = "grey35", hjust = 0)
+    )
+  )
+
+fig_flip
+```
+
+```{r}
+#| label: save-visual-flip
+#| include: false
+
+ggsave(
+  file.path(fig_dir, "hero_direction_flip.png"),
+  fig_flip, width = 11, height = 5.5, dpi = 180, bg = "white"
+)
+```
+
+## Visual 8 — Population Mean PSD with Confidence Ribbons
+
+Grand-average Welch PSD split by grip effort. The tremor peak (8–12 Hz) is
+dramatically elevated under low-grip conditions — confirming that 5% MVC load
+does *not* suppress physiological tremor the way 40% MVC does.
+
+```{r}
+#| label: visual-psd-ribbon
+#| fig-height: 5
+
+psd_profile <- read.csv(file.path(repo, "reports", "population_psd_profile.csv"))
+psd_profile$Grip <- ifelse(psd_profile$is_high_grip %in% c("True","TRUE",1, TRUE),
+                           "High (40% MVC)", "Low (5% MVC)")
+
+# Mark canonical bands
+band_df <- data.frame(
+  xmin = c(0.5, 8),  xmax = c(3, 12),
+  label = c("Tracking\n(0.5–3 Hz)", "Tremor\n(8–12 Hz)"),
+  y = c(Inf, Inf)
+)
+
+p_psd <- ggplot(psd_profile, aes(x = freq_hz, y = mean_psd, colour = Grip, fill = Grip)) +
+  geom_rect(data = band_df, inherit.aes = FALSE,
+            aes(xmin = xmin, xmax = xmax, ymin = -Inf, ymax = Inf),
+            alpha = 0.08, fill = c(band_colors[[1]], band_colors[[2]])) +
+  geom_ribbon(aes(ymin = mean_psd - se_psd, ymax = mean_psd + se_psd), alpha = 0.25, colour = NA) +
+  geom_line(linewidth = 1.1) +
+  geom_text(data = band_df, inherit.aes = FALSE,
+            aes(x = (xmin + xmax) / 2, y = Inf, label = label),
+            vjust = 1.4, size = 3, colour = "grey30") +
+  scale_colour_manual(values = grip_scale_colors) +
+  scale_fill_manual(values = grip_scale_colors) +
+  scale_y_log10(labels = scales::label_scientific()) +
+  scale_x_continuous(breaks = c(0, 2, 4, 6, 8, 10, 12, 15, 20)) +
+  labs(
+    x = "Frequency (Hz)",
+    y = "Mean PSD (log\u2081\u2080 scale)",
+    colour = "Grip effort", fill = "Grip effort"
+  ) +
+  theme_hero() +
+  theme(legend.position = c(0.82, 0.82))
+
+p_psd_annotated <- p_psd +
+  plot_annotation(
+    title = "Grip Level Reshapes Target-Normalized Force Spectra",
+    subtitle = paste0(
+      "Grand-average Welch PSD ± SE across all subjects (*N* = 65). ",
+      "Shaded bands mark visuomotor tracking (0.5–3 Hz) and physiological tremor (8–12 Hz) windows.<br>",
+      "High-grip (40% MVC) shows lower tremor-band power; low-grip (5% MVC) shows higher tremor-band power."
+    ),
+    theme = theme(
+      plot.title    = element_markdown(face = "bold", size = 14),
+      plot.subtitle = element_markdown(size = 10, colour = "grey35")
+    )
+  )
+
+p_psd_annotated
+```
+
+```{r}
+#| label: save-visual-psd-ribbon
+#| include: false
+
+ggsave(
+  file.path(fig_dir, "hero_psd_ribbon.png"),
+  p_psd_annotated, width = 10, height = 5, dpi = 180, bg = "white"
+)
+```
+
+## Visual 9 — Subject-Level Load Cost (Caterpillar Plot)
+
+Each point is one subject's accuracy drop from low-grip to high-grip condition
+(*load cost* = low-accuracy − high-accuracy). Subjects are sorted by cost;
+the caterpillar reveals substantial individual differences — some subjects
+are *helped* by load (more alert), most are hindered.
+
+```{r}
+#| label: visual-caterpillar
+#| fig-height: 6.5
+
+subj_sum <- read.csv(file.path(repo, "reports", "subject_level_summary.csv"))
+subj_sum$subject_id <- as.character(subj_sum$subject_id)
+
+# Sort by load_cost
+subj_sum <- subj_sum[order(subj_sum$load_cost, na.last = TRUE), ]
+subj_sum$subject_ord <- seq_len(nrow(subj_sum))
+subj_sum$direction   <- ifelse(subj_sum$load_cost > 0, "Hindered", "Facilitated")
+
+p_cat <- ggplot(subj_sum[!is.na(subj_sum$load_cost),],
+                aes(x = subject_ord, y = load_cost, colour = direction)) +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
+  geom_segment(aes(xend = subject_ord, yend = 0), linewidth = 0.6, alpha = 0.5) +
+  geom_point(size = 2.8) +
+  scale_colour_manual(values = load_effect_colors, name = "Load effect") +
+  scale_y_continuous(labels = scales::label_percent(accuracy = 1)) +
+  labs(
+    x = "Subject (ranked by load cost)",
+    y = "Accuracy drop under 40% MVC load\n(low − high grip accuracy)"
+  ) +
+  theme_hero() +
+  theme(legend.position = c(0.15, 0.85),
+        axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+pct_hindered_cat <- round(100 * mean(subj_sum$load_cost[!is.na(subj_sum$load_cost)] > 0))
+pct_facilitated_cat <- 100 - pct_hindered_cat
+
+p_cat_annotated <- p_cat +
+  plot_annotation(
+    title = "Substantial Individual Differences in Cognitive Load Cost",
+    subtitle = paste0(
+      "Each stem = one subject; positive = accuracy *drops* under high grip, ",
+      "negative = accuracy *improves*.<br>",
+      pct_hindered_cat, "% of subjects show a detectable load cost; ",
+      pct_facilitated_cat, "% are facilitated or unaffected."
+    ),
+    theme = theme(
+      plot.title    = element_markdown(face = "bold", size = 14),
+      plot.subtitle = element_markdown(size = 10, colour = "grey35")
+    )
+  )
+
+p_cat_annotated
+```
+
+```{r}
+#| label: save-visual-caterpillar
+#| include: false
+
+ggsave(
+  file.path(fig_dir, "hero_caterpillar.png"),
+  p_cat_annotated, width = 10, height = 5.5, dpi = 180, bg = "white"
+)
+```
+
+## Visual 10 — Speed–Accuracy Trade-off Under Load
+
+Does 40% MVC load make people slower, less accurate, or both?
+This scatter shows per-subject median RT vs. accuracy for each grip condition
+(connected by a line), revealing whether the load shifts the SAT frontier.
+
+```{r}
+#| label: visual-sat
+#| fig-height: 5.5
+
+sat_dat <- model_tbl
+sat_dat$resp_rt_ms <- sat_dat$same_diff_resp_secs * 1000
+sat_dat <- sat_dat[!is.na(sat_dat$resp_rt_ms) & sat_dat$resp_rt_ms > 100 & sat_dat$resp_rt_ms < 5000, ]
+
+sat <- sat_dat |>
+  mutate(grip_label = ifelse(is_high_grip %in% c(TRUE,"True","TRUE",1), "High (40% MVC)", "Low (5% MVC)")) |>
+  group_by(subject_id, grip_label) |>
+  summarise(
+    med_rt  = median(resp_rt_ms, na.rm = TRUE),
+    acc     = mean(as.integer(resp_is_correct %in% c(TRUE,"True","TRUE",1)), na.rm = TRUE),
+    .groups = "drop"
+  )
+
+sat_wide <- sat |>
+  tidyr::pivot_wider(names_from = grip_label,
+                     values_from = c(med_rt, acc))
+has_both <- sat_wide[!is.na(sat_wide[["med_rt_High (40% MVC)"]]) &
+                     !is.na(sat_wide[["med_rt_Low (5% MVC)"]]), "subject_id"]
+
+sat_paired <- sat[sat$subject_id %in% has_both$subject_id, ]
+
+p_sat <- ggplot(sat_paired, aes(x = med_rt, y = acc, colour = grip_label, group = subject_id)) +
+  geom_line(colour = "grey75", linewidth = 0.4, alpha = 0.7) +
+  geom_point(size = 2.5, alpha = 0.85) +
+  # Grand means
+  stat_summary(aes(group = grip_label), fun = mean, geom = "point",
+               size = 5, shape = 18, show.legend = FALSE) +
+  stat_summary(aes(group = grip_label), fun.data = mean_se, geom = "errorbar",
+               width = 20, linewidth = 1.1, show.legend = FALSE) +
+  scale_colour_manual(values = grip_scale_colors, name = "Grip effort") +
+  scale_y_continuous(labels = label_percent(accuracy = 1), limits = c(0.35, 1.0)) +
+  labs(
+    x = "Median response time (ms)",
+    y = "Perceptual accuracy"
+  ) +
+  theme_hero() +
+  theme(legend.position = c(0.82, 0.2))
+
+p_sat_annotated <- p_sat +
+  plot_annotation(
+    title = "Load-Related Accuracy Differences Were Not Explained by Faster Responses",
+    subtitle = paste0(
+      "Each line connects one subject's SAT point under low (light blue) vs. high (magenta) grip. ",
+      "Diamond markers = grand mean ± SE.<br>",
+      "High grip shifts the cloud *down* (lower accuracy) with little systematic change in RT, ",
+      "arguing against a pure speed–accuracy trade-off."
+    ),
+    theme = theme(
+      plot.title    = element_markdown(face = "bold", size = 14),
+      plot.subtitle = element_markdown(size = 10, colour = "grey35")
+    )
+  )
+
+p_sat_annotated
+```
+
+```{r}
+#| label: save-visual-sat
+#| include: false
+
+ggsave(
+  file.path(fig_dir, "hero_sat_tradeoff.png"),
+  p_sat_annotated, width = 9, height = 5.5, dpi = 180, bg = "white"
+)
+```
+
+## Export summary
+
+```{r}
+#| label: export-summary
+
+cat("Saved figures to:", fig_dir, "\n")
+list.files(fig_dir, pattern = "^hero_.*\\.(png|csv)$", full.names = TRUE)
+```

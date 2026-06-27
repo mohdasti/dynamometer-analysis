@@ -16,14 +16,17 @@ Confirmed local paths (Mac, Jun 2026). Per-file gripforce stats (duration, force
 - **85** subject folders matching `sub-BAP###`
 - **`BAP tablet data/`** — separate tablet recordings (not in-scanner `InsideScanner` gripforce; treat as distinct modality until inventoried)
 
-### In-scanner gripforce — confirmed
+### In-scanner gripforce — analysis scope
+
+Oddball tasks only for gripforce analysis (**MVCnPRAC excluded**; MVC values come from behavioral `mvc` column).
 
 | Metric | Value |
 |--------|------:|
-| Files (`*_gripforce.csv` under `*InsideScanner*`) | **202** (confirmed via `find`) |
-| Task: Aoddball | 84 *(expected)* |
-| Task: Voddball | 72 *(expected)* |
-| Task: MVCnPRAC | 46 *(expected)* |
+| Files (`*_gripforce.csv` under `*InsideScanner*`, oddball only) | **156** (84 Aoddball + 72 Voddball) |
+| All gripforce files including MVCnPRAC | 202 |
+| Task: Aoddball | 84 |
+| Task: Voddball | 72 |
+| Task: MVCnPRAC | 46 *(excluded from analysis)* |
 
 ### File format
 
