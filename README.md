@@ -1,10 +1,13 @@
 # dynamometer-analysis
 
+[![R](https://img.shields.io/badge/R-4.4+-276DC3?logo=r&logoColor=white)](https://www.r-project.org/)
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Quarto](https://img.shields.io/badge/Quarto-1.8+-75AADB?logo=quarto&logoColor=white)](https://quarto.org/)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20950701.svg)](https://doi.org/10.5281/zenodo.20950701)
+
 Trial-level spectral analysis of **BAP in-scanner dynamometer (grip force)** data linked to perceptual oddball performance. The pipeline extracts event-locked band power from 100 Hz force streams, tests whether tremor and tracking features predict perceptual accuracy under physical load, and validates predictions with out-of-sample ML and exploratory LC neuroimaging covariates.
 
 **Manuscript:** *Can Grip-Force Dynamics Track Perceptual Strain? A Trial-Level Spectral Analysis in Older Adults*
-
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20950701.svg)](https://doi.org/10.5281/zenodo.20950701)
 
 **Primary question:** Do sub-second grip-force spectral dynamics (visuomotor tracking 0.5–3 Hz; physiological tremor 8–12 Hz) carry incremental information about trial-level perceptual accuracy beyond nominal task difficulty — especially under high (40% MVC) physical load?
 
