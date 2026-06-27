@@ -391,11 +391,11 @@ The study also introduces a full trial-level spectral pipeline for continuous gr
 
 # Data Availability Statement {.unnumbered}
 
-The analysis code and anonymized trial-level data are available upon reasonable request. Analysis notebooks are documented in the Supplementary Materials. Raw neuroimaging and MRI data cannot be shared publicly due to institutional data governance requirements.
+De-identified behavioral data are available from the corresponding author upon reasonable request. Analysis code and study materials are available via Zenodo (https://doi.org/10.5281/zenodo.20950701) 
 
 # Ethics Statement {.unnumbered}
 
-The study was conducted in accordance with the Declaration of Helsinki. All procedures were approved by the University of California, Riverside Institutional Review Board (Protocol \#). All participants provided written informed consent prior to participation.
+All procedures were approved by the Institutional Review Board at the University of California, Riverside (Protocol No. HS-21-055). All participants provided written informed consent prior to participation.
 
 # Author Contributions {.unnumbered}
 
@@ -403,11 +403,11 @@ MD: conceptualization, data analysis, manuscript preparation. Additional authors
 
 # Funding {.unnumbered}
 
-*[Funding sources to be completed prior to submission.]*
+This work was supported by NIA (Grant No. NIH/NIA R01AG072607). The funder had no role in study design, data collection, analysis, decision to publish, or manuscript preparation.
 
 # Conflict of Interest {.unnumbered}
 
-The authors declare that the research was conducted in the absence of any commercial or financial relationships that could be construed as a potential conflict of interest.
+The authors declare that they have no competing interests.
 
 # Acknowledgments {.unnumbered}
 
