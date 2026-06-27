@@ -4,16 +4,22 @@ subtitle: "Can Grip-Force Dynamics Track Perceptual Strain? A Trial-Level Spectr
 author: "Mohammad Dastgheib"
 date: "2026-06-24"
 bibliography: references.bib
+csl: apa.csl
 format:
   html:
     toc: true
     toc-depth: 3
     number-sections: true
     code-fold: true
-  pdf:
+  typst:
     toc: true
     toc-depth: 3
     number-sections: true
+    papersize: us-letter
+    margin:
+      x: 1in
+      y: 1in
+    section-numbering: "1.1"
 ---
 
 Main manuscript: [manuscript.qmd](manuscript.qmd) (HTML/PDF) · [manuscript-biorxiv.qmd](manuscript-biorxiv.qmd) (bioRxiv preprint PDF)
@@ -89,9 +95,9 @@ knitr::kable(funnel_out, align = c("l", "r", "r", "r", "l"))
 
 ![Single-trial signal chain from grip force to spectral phenotype.](figures/hero_single_trial_anatomy.png){#fig-supp-anatomy width=95%}
 
-**Probe-locked spectrogram.** Time–frequency power aligned to probe onset (*t* = 0), with normalized error in the upper panel.
+**Representative force trace and short-time spectrum.** Normalized error and time–frequency power from a representative high-grip incorrect trial; probe onset is marked at *t* = 0 for reference (inferential features use the full trial epoch).
 
-![Probe-locked motor spectrogram aligned to oddball onset.](figures/hero_probe_locked_spectrogram.png){#fig-supp-spectrogram width=90%}
+![Representative force trace and short-time spectrum from the analysis epoch.](figures/hero_probe_locked_spectrogram.png){#fig-supp-spectrogram width=90%}
 
 **Population spectral distributions.**
 

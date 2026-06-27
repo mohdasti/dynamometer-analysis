@@ -406,13 +406,13 @@ ggsave(
 )
 ```
 
-## Visual 4 — Probe-locked spectrogram (cognitive shock)
+## Visual 4 — Representative force trace and short-time spectrum
 
-Time–frequency power aligned so **probe onset = 0 s**. Pre-probe window shaded; tracking and tremor bands highlighted. Top panel shows normalized error on the same axis — the motor response to the perceptual event.
+Normalized error and time–frequency power from a representative trial epoch. Probe onset is marked at **t = 0 s** for reference; inferential features use the full trial epoch. Pre-probe window shaded; tracking and tremor bands highlighted.
 
 ```{r}
 #| label: visual-4-specgram
-#| fig-cap: "Probe-locked spectrogram with normalized error aligned to oddball onset."
+#| fig-cap: "Representative force trace and short-time spectrum from the analysis epoch (probe onset marked at t = 0)."
 
 pre_probe_fill <- signal_colors["pre_epoch"]
 
@@ -455,11 +455,11 @@ p_specgram <- ggplot(hero_spec, aes(x = time_from_probe_s, y = freq_hz, fill = p
 fig_specgram <- p_probe_error / p_specgram +
   plot_layout(heights = c(1, 2.4)) +
   plot_annotation(
-    title = "Representative Probe-Locked Force Trace and Short-Time Spectrum",
+    title = "Representative Force Trace and Short-Time Spectrum",
     subtitle = paste0(
       trace_label,
       "<br>**A** = normalized force error; **B** = short-time spectrum (representative trial; not inferential). ",
-      "Vertical gold line = oddball probe onset (*t* = 0). ",
+      "Vertical gold line = probe onset (*t* = 0; reference only). ",
       "Green band = tracking (0.5–3 Hz); pink band = tremor (8–12 Hz)."
     ),
     theme = theme(

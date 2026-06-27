@@ -11,12 +11,13 @@ author:
         country: USA
 date: "2026-06-24"
 bibliography: references.bib
+csl: apa.csl
 abstract: |
   **Background:** Older adults frequently perform perceptual decisions while sustaining physical effort, yet most dual-task research treats motor output as a binary manipulation rather than a continuous behavioral signal. Here we ask whether sub-second grip-force spectral dynamics carry incremental information about trial-level perceptual accuracy beyond nominal task difficulty.
   
   **Methods:** Older adults (*N* ≈ 64, mean age 69.5 years) performed auditory and visual same/different discrimination tasks while maintaining low (5%) or high (40%) isometric handgrip force scaled to maximum voluntary contraction. Event-locked spectral power was extracted from the continuous dynamometer stream in a visuomotor tracking band (0.5–3.0 Hz) and a physiological tremor band (8.0–12.0 Hz). Mixed-effects logistic regression tested whether band-power features improved prediction of perceptual accuracy, and subject-wise cross-validation assessed out-of-sample generalizability. Thirty-seven trials (< 0.4% per grip arm) with implausibly large tremor spectral power (|*z*| > 3.5; max *z* ≈ 48.5) were identified as recording artifacts and excluded prior to all inferential analyses; accuracy labels were not used in this screen.
   
-  **Results:** After the outlier screen, adding force-spectral features significantly improved model fit over the baseline psychometric model in the high-grip arm (LRT χ²(2) = 7.34, *p* = .025). Tremor-band power was negatively associated with accuracy (OR = 0.64, 95% CI [0.46, 0.89], *p* = .008), and the tremor-accuracy association was amplified at harder stimulus levels (tremor × difficulty interaction, *p* = .005). Tracking-band power was not significant (OR = 1.03, *p* = .452). The tremor association was not grip-specific: both strata showed similar negative slopes and a formal tremor × grip interaction was not significant (*p* = .244). Cross-validated models confirmed directional incremental gain from force features (ΔAUC ≈ 0.006). Exploratory locus coeruleus microstructure analyses yielded non-significant directional trends only.
+  **Results:** After the outlier screen, adding force-spectral features significantly improved model fit over the baseline psychometric model in the high-grip arm (LRT χ²(2) = 7.34, *p* = .025). Tremor-band power was negatively associated with accuracy (OR = 0.64, 95% CI [0.46, 0.89], *p* = .008), and the tremor-accuracy association was amplified at harder stimulus levels (tremor × difficulty interaction, *p* = .005). Tracking-band power was not significant (OR = 1.03, *p* = .452). The tremor association was not grip-specific: both strata showed similar negative slopes and a formal tremor × grip interaction was not significant (*p* = .244). Cross-validated models showed a small directional increment from force features (ΔAUC ≈ 0.006). Exploratory locus coeruleus microstructure analyses yielded non-significant directional trends only.
   
   **Conclusion:** Trial-level tremor-band power significantly predicted perceptual accuracy under high physical load, with amplification at harder trials. This effect was not unique to high effort, suggesting a general motor instability signal rather than a high-load-specific candidate marker. Sensitivity analyses confirmed robustness across removal thresholds and winsorization. The results provide a reproducible force-signal pipeline and initial evidence for spectral-perceptual coupling in aging.
 keywords:
@@ -34,15 +35,14 @@ format:
     toc-depth: 3
     number-sections: true
     code-fold: true
-  pdf:
+  typst:
     toc: false
     number-sections: true
-    geometry:
-      - margin=1in
-    include-in-header:
-      text: |
-        \usepackage{lineno}
-        \linenumbers
+    papersize: us-letter
+    margin:
+      x: 1in
+      y: 1in
+    section-numbering: "1.1"
 ---
 
 {{< include _manuscript-content.qmd >}}

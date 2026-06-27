@@ -28,12 +28,12 @@ cp reports/figures/hero_*.png manuscript/figures/
 
 ```bash
 cd manuscript
-quarto render manuscript.qmd              # HTML + LaTeX PDF
-quarto render manuscript.qmd --to pdf
+quarto render manuscript.qmd              # HTML + Typst PDF
+quarto render manuscript.qmd --to typst
 quarto render manuscript-biorxiv.qmd    # HTML + bioRxiv Typst PDF
 quarto render manuscript-biorxiv.qmd --to biorxiv-typst
-quarto render supplementary.qmd         # HTML + PDF
-quarto render supplementary.qmd --to pdf
+quarto render supplementary.qmd         # HTML + Typst PDF
+quarto render supplementary.qmd --to typst
 ```
 
 Shared prose lives in `manuscript/_manuscript-content.qmd` (included by both main and bioRxiv builds).
