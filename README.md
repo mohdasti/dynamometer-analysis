@@ -4,6 +4,8 @@ Trial-level spectral analysis of **BAP in-scanner dynamometer (grip force)** dat
 
 **Manuscript:** *Can Grip-Force Dynamics Track Perceptual Strain? A Trial-Level Spectral Analysis in Older Adults*
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20950701.svg)](https://doi.org/10.5281/zenodo.20950701)
+
 **Primary question:** Do sub-second grip-force spectral dynamics (visuomotor tracking 0.5–3 Hz; physiological tremor 8–12 Hz) carry incremental information about trial-level perceptual accuracy beyond nominal task difficulty — especially under high (40% MVC) physical load?
 
 ## Quick start
